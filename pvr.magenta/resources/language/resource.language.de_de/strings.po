@@ -1,0 +1,77 @@
+# Kodi Media Center language file
+# Addon Name: PVR Hrti Client
+# Addon id: pvr.hrti
+# Addon Provider: Pulse-Eight Ltd.
+msgid ""
+msgstr ""
+"Project-Id-Version: KODI Main\n"
+"Report-Msgid-Bugs-To: http://trac.kodi.tv/\n"
+"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: Automatically generated\n"
+"Language-Team: none\n"
+"Language: de_de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=n != 1;\n"
+
+msgctxt "Addon Summary"
+msgid "Hrti PVR Client"
+msgstr "Hrti PVR Client"
+
+msgctxt "Addon Description"
+msgid "PVR Client for HRTi platform which allows you to watch live HRT TV channels and listening HRT radio stations."
+msgstr ""
+
+msgctxt "Addon Disclaimer"
+msgid "Inofficial Addon - Use on own risk"
+msgstr "Inoffizielles Addon - Benutzung auf eigene Gefahr"
+
+#. Setting to set used stream username
+#: pvr.hrti/resources/settings.xml
+msgctxt "#30000"
+msgid "Username"
+msgstr "Benutzername"
+
+#. Setting to set used stream password
+#: pvr.hrti/resources/settings.xml
+msgctxt "#30001"
+msgid "Password"
+msgstr "Passwort"
+
+msgctxt "#30002"
+msgid "IP Address"
+msgstr "IP Adresse"
+
+msgctxt "#30003"
+msgid "Token"
+msgstr "Token"
+
+msgctxt "#30004"
+msgid "Device ID"
+msgstr "Device ID"
+
+#. Settings category label
+#: pvr.hrti/resources/settings.xml
+msgctxt "#30014"
+msgid "Hrti"
+msgstr "Hrti"
+
+#. Settings group label
+#: pvr.hrti/resources/settings.xml
+msgctxt "#30015"
+msgid "Credentials"
+msgstr "Zugangsdaten"
+
+msgctxt "#30010"
+msgid "PVR client menu hook item (settings) called."
+msgstr ""
+
+msgctxt "#30011"
+msgid "PVR client menu hook item (all items) called"
+msgstr ""
+
+msgctxt "#30012"
+msgid "PVR client menu hook item (channels) called"
+msgstr ""

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addon
+  id="pvr.hrti"
+  version="20.5.0"
+  name="Hrti PVR Client"
+  provider-name="Nirvana">
+  <requires>@ADDON_DEPENDS@</requires>
+  <extension
+    point="kodi.pvrclient"
+    library_@PLATFORM@="@LIBRARY_FILENAME@"/>
+  <extension point="xbmc.addon.metadata">
+    <platform>@PLATFORM@</platform>
+    <license>GPL-2.0-or-later</license>
+    <source>https://github.com/kodi-pvr/pvr.demo</source>
+    <forum>https://forum.kodi.tv/forumdisplay.php?fid=173</forum>
+    <assets>
+      <icon>icon.png</icon>
+    </assets>
+    <summary lang="de_DE">Hrti PVR Client</summary>
+    <summary lang="en_GB">Hrti PVR Client</summary>
+    <summary lang="en_US">Hrti PVR Client</summary>
+    <description lang="de_DE">Hrti PVR Client</description>
+    <description lang="en_GB">Hrti PVR Client</description>
+    <description lang="en_US">Hrti PVR Client</description>
+    <disclaimer lang="de_DE">Enthält nur Fragmente</disclaimer>
+    <disclaimer lang="en_GB">Just contains stubs</disclaimer>
+    <disclaimer lang="en_US">Just contains stubs</disclaimer>
+  </extension>
+</addon>

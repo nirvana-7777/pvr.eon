@@ -1,0 +1,22 @@
+Source: kodi-pvr-demo
+Priority: extra
+Maintainer: Nobody <nobody@kodi.tv>
+Build-Depends: debhelper (>= 9.0.0), cmake, libtinyxml2-dev,
+               kodi-addon-dev
+Standards-Version: 4.1.2
+Section: libs
+
+Package: kodi-pvr-demo
+Section: libs
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Demo PVR for Kodi
+ Demo PVR for Kodi
+
+Package: kodi-pvr-demo-dbg
+Section: debug
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: debug symbols for Demo PVR for Kodi
+ debug symbols for Demo PVR for Kodi
+
