@@ -131,3 +131,11 @@ msgstr ""
 msgctxt "#30031"
 msgid "Device Serial"
 msgstr ""
+
+msgctxt "#30032"
+msgid "Generic Access Token"
+msgstr ""
+
+msgctxt "#30033"
+msgid "First channel number"
+msgstr ""

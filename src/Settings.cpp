@@ -80,13 +80,6 @@ bool CSettings::Load()
     return false;
   }
 
-  if (!kodi::addon::CheckSettingBoolean("hidegeoblocked", m_hidegeoblocked))
-  {
-    /* If setting is unknown fallback to defaults */
-    kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'hidegeoblocked' setting");
-    return false;
-  }
-
   if (!kodi::addon::CheckSettingBoolean("hideunsubscribed", m_hideunsubscribed))
   {
     /* If setting is unknown fallback to defaults */
@@ -140,6 +133,13 @@ bool CSettings::Load()
   {
     /* If setting is unknown fallback to defaults */
     kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'ssidentity' setting");
+    return false;
+  }
+
+  if (!kodi::addon::CheckSettingInt("startnum", m_start_num))
+  {
+    /* If setting is unknown fallback to defaults */
+    kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'startnum' setting");
     return false;
   }
 

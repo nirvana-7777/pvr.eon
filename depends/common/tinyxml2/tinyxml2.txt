@@ -1,1 +1,0 @@
-tinyxml2 https://github.com/leethomason/tinyxml2/archive/refs/tags/9.0.0.tar.gz

@@ -20,6 +20,7 @@ public:
   bool RefreshSSToken();
   bool RefreshGenericToken();
   void ClearSession();
+  void SetApi(const std::string& api);
   std::string GetUUID();
    void SetStatusCodeHandler(HttpStatusCodeHandler* statusCodeHandler) {
     m_statusCodeHandler = statusCodeHandler;
@@ -29,6 +30,7 @@ private:
   std::string HttpRequestToCurl(Curl &curl, const std::string& action, const std::string& url, const std::string& postData, int &statusCode);
   std::string GenerateUUID();
   std::string m_uuid;
+  std::string m_api;
   CSettings* m_settings;
   HttpStatusCodeHandler *m_statusCodeHandler = nullptr;
 };

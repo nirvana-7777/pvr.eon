@@ -30,6 +30,7 @@ set(EON_HEADERS
   src/Utils.h
   src/Settings.h
   src/PVREon.h
+  src/Globals.h
 )
 
 addon_version(pvr.eon EON)

@@ -1,5 +1,5 @@
 #include "HttpClient.h"
-//#include "../PVREon.h"
+#include "../Globals.h"
 //#include "Cache.h"
 #include <random>
 //#include "../md5.h"
@@ -9,12 +9,12 @@
 #include "../Utils.h"
 #include <botan/hash.h>
 #include <botan/hex.h>
+#include <botan/base64.h>
 
-static const std::string EON_USER_AGENT = std::string("Kodi/")
-    + std::string(STR(KODI_VERSION)) + std::string(" pvr.eon/")
-    + std::string(STR(EON_VERSION));
-
-static std::string BROKER_URL = "https://broker.global.united.cloud/";
+void HttpClient::SetApi(const std::string& api)
+{
+  m_api = api;
+}
 
 bool HttpClient::RefreshGenericToken()
 {
@@ -23,8 +23,10 @@ bool HttpClient::RefreshGenericToken()
   std::string url = BROKER_URL + "oauth/token?grant_type=client_credentials";
   std::string postData = "{}";
 
-  // b8d9ade4-1093-46a7-a4f7-0e47be463c10:1w4dmww87x1e9l89essqvc81pidrqsa0li1rva23
-  curl_auth.AddHeader("Authorization", "Basic YjhkOWFkZTQtMTA5My00NmE3LWE0ZjctMGU0N2JlNDYzYzEwOjF3NGRtd3c4N3gxZTlsODllc3NxdmM4MXBpZHJxc2EwbGkxcnZhMjM=");
+  std::string basic_token = CLIENT_ID + ":" + CLIENT_SECRET;
+  // Copy input data to a buffer that will be encrypted
+  Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+  curl_auth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
 
   int statusCode;
   std::string content_auth = HttpRequestToCurl(curl_auth, "POST", url, postData, statusCode);
@@ -57,8 +59,8 @@ bool HttpClient::RefreshSSToken()
   std::string access_token = m_settings->GetSSAccessToken();
   std::string username = m_settings->GetEonUsername();
   std::string password = m_settings->GetEonPassword();
-  std::string postData = "{\"domainId\":\"TBA\""
-                           ",\"applicationId\":\"vpb\""
+  std::string postData = "{\"domainId\":\"" + SS_DOMAIN +
+                           "\",\"applicationId\":\"vpb\""
                            ",\"grantType\":\"";
 
   if (!refresh_token.empty()) {
@@ -66,14 +68,16 @@ bool HttpClient::RefreshSSToken()
                           ",\"refreshToken\":\"" + refresh_token + "\"}";
   } else if (!username.empty() && !password.empty()) {
     postData = postData + "password\"" +
-                          ",\"password\":\"U2FsdGVkX18o+sPA+vov3dp1mbYZznyjDZWWJqIcABo=\"" + //TODO: Fix Password
-                          ",\"username\":\"" + username + "\"}";
+                          ",\"password\":\"" + password +  //TODO: Fix Password: Salted AES encrypted hash - Passphrase is SS_PASS
+                          "\",\"username\":\"" + username + "\"}";
   } else {
     kodi::Log(ADDON_LOG_ERROR, "Failed to refresh self service token");
     return false;
   }
-  //             TODO: webscuser:k4md93!k334f3
-  curl_auth.AddHeader("Authorization", "Basic d2Vic2N1c2VyOms0bWQ5MyFrMzM0ZjM=");
+  std::string basic_token = SS_USER + ":" + SS_SECRET;
+  // Copy input data to a buffer that will be encrypted
+  Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+  curl_auth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
   curl_auth.AddHeader("Content-Type", "application/json");
 
   int statusCode;
@@ -111,7 +115,7 @@ bool HttpClient::RefreshToken()
 {
   Curl curl_auth;
 
-  std::string url = "https://api-web.ug-be.cdn.united.cloud/oauth/token?grant_type=";
+  std::string url = m_api + "oauth/token?grant_type=";
   std::string refresh_token = m_settings->GetEonRefreshToken();
   std::string postData = "{}";
 
@@ -137,12 +141,18 @@ bool HttpClient::RefreshToken()
     url += "password";
   }
   else {
-    url = BROKER_URL + "oauth/token?grant_type=client_credentials";
+    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh token");
+    return false;
   }
 
   int statusCode;
 
-  curl_auth.AddHeader("Authorization", "Basic YjhkOWFkZTQtMTA5My00NmE3LWE0ZjctMGU0N2JlNDYzYzEwOjF3NGRtd3c4N3gxZTlsODllc3NxdmM4MXBpZHJxc2EwbGkxcnZhMjM=");
+
+  std::string basic_token = CLIENT_ID + ":" + CLIENT_SECRET;
+  // Copy input data to a buffer that will be encrypted
+  Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+  curl_auth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+
   std::string content_auth = HttpRequestToCurl(curl_auth, "POST", url, postData, statusCode);
 
   rapidjson::Document doc;
@@ -275,16 +285,21 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
     if (!access_token.empty()) {
       curl.AddHeader("accesstoken", access_token);
     }
-    curl.AddHeader("Authorization", "Basic d2Vic2N1c2VyOms0bWQ5MyFrMzM0ZjM=");
+    std::string basic_token = SS_USER + ":" + SS_SECRET;
+    // Copy input data to a buffer that will be encrypted
+    Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+    curl.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
   } else {
-    found = url.find(BROKER_URL);
-    if (found != std::string::npos) {
+    if (url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos) {
       access_token = m_settings->GetGenericAccessToken();
     }
     if (!access_token.empty()) {
       curl.AddHeader("Authorization", "bearer " + access_token);
     } else {
-      curl.AddHeader("Authorization", "Basic YjhkOWFkZTQtMTA5My00NmE3LWE0ZjctMGU0N2JlNDYzYzEwOjF3NGRtd3c4N3gxZTlsODllc3NxdmM4MXBpZHJxc2EwbGkxcnZhMjM=");
+      std::string basic_token = CLIENT_ID + ":" + CLIENT_SECRET;
+      // Copy input data to a buffer that will be encrypted
+      Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+      curl.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
     }
   }
   curl.AddHeader("Content-Type", "application/json");
@@ -293,33 +308,7 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
   if (found != std::string::npos) {
     curl.AddHeader("x-ucp-time-format", "timestamp");
   }
-//  curl.AddHeader("Accept", "application/json, text/plain, */*");
-/*
-  curl.AddOption("acceptencoding", "gzip,deflate");
 
-  std::string cookie = "";
-
-  if (!m_beakerSessionId.empty())
-  {
-    cookie += "beaker.session.id=" + m_beakerSessionId + "; ";
-  }
-
-  if (!m_uuid.empty())
-  {
-    cookie += "uuid=" + m_uuid + "; ";
-  }
-
-  if (!m_zattooSession.empty())
-  {
-    cookie += "zattoo.session=" + m_zattooSession + "; ";
-  }
-
-  if (!cookie.empty()) {
-    curl.AddOption("Cookie", cookie);
-  }
-
-  curl.AddHeader("User-Agent", USER_AGENT);
-*/
   std::string content = HttpRequestToCurl(curl, action, url, postData, statusCode);
 
   if (statusCode == 401) {
@@ -329,7 +318,10 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
       if (RefreshSSToken()) {
         access_token = m_settings->GetSSAccessToken();
         curl_reauth.AddHeader("accesstoken", access_token);
-        curl_reauth.AddHeader("Authorization", "Basic d2Vic2N1c2VyOms0bWQ5MyFrMzM0ZjM=");
+        std::string basic_token = SS_USER + ":" + SS_SECRET;
+        // Copy input data to a buffer that will be encrypted
+        Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+        curl_reauth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
       }
     } else {
       found = url.find(BROKER_URL);
@@ -355,23 +347,7 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
     }
     return "";
   }
-/*
-  std::string sessionId = curl.GetCookie("beaker.session.id");
-  if (!sessionId.empty() && m_beakerSessionId != sessionId)
-  {
-    kodi::Log(ADDON_LOG_DEBUG, "Got new beaker.session.id: %s..",
-        sessionId.substr(0, 5).c_str());
-    m_beakerSessionId = sessionId;
-  }
 
-  std::string zattooSession = curl.GetCookie("zattoo.session");
-  if (!zattooSession.empty() && m_zattooSession != zattooSession)
-  {
-    kodi::Log(ADDON_LOG_DEBUG, "Got new zattooSession: %s..", zattooSession.substr(0, 5).c_str());
-    m_zattooSession = zattooSession;
-    m_parameterDB->Set("zattooSession", zattooSession);
-  }
-*/
   return content;
 }
 

@@ -14,9 +14,6 @@
 #include "http/HttpClient.h"
 #include "rapidjson/document.h"
 
-static std::string GLOBAL_URL = "global.united.cloud/";
-static std::string BROKER_URL = "https://broker." + GLOBAL_URL;
-
 struct EonChannel
 {
   bool bRadio;
@@ -177,10 +174,13 @@ private:
   std::string m_stream_key;
   std::string m_stream_un;
   std::string m_service_provider;
-  std::string m_api;
-  std::string m_images_api;
+  std::string m_support_web;
 //  std::string m_ss_access;
   std::string m_ss_identity;
+
+  std::string m_api;
+  std::string m_images_api;
+
 //  std::string m_ss_refresh;
 //  int m_active_profile_id;
 //  int m_expires_in;

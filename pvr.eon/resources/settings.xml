@@ -129,11 +129,6 @@
           <default>false</default>
           <control type="toggle" />
         </setting>
-        <setting id="hidegeoblocked" type="boolean" label="30021">
-          <level>0</level>
-          <default>false</default>
-          <control type="toggle" />
-        </setting>
         <setting id="enabletv" type="boolean" label="30022">
           <level>0</level>
           <default>true</default>
@@ -148,6 +143,14 @@
           <level>0</level>
           <default>true</default>
           <control type="toggle" />
+        </setting>
+        <setting id="startnum" type="integer" label="30033">
+          <level>0</level>
+          <default>1</default>
+          <constraints>
+            <allowempty>false</allowempty>
+          </constraints>
+          <control type="edit" format="integer" />
         </setting>
       </group>
     </category>

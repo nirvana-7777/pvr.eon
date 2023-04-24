@@ -143,3 +143,11 @@ msgstr "Self Service Identity"
 msgctxt "#30031"
 msgid "Device Serial"
 msgstr "Geraeteseriennummer"
+
+msgctxt "#30032"
+msgid "Generic Access Token"
+msgstr "Generisches Access Token"
+
+msgctxt "#30033"
+msgid "First channel number"
+msgstr "Erste Sendernummer"

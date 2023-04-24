@@ -7,34 +7,24 @@
  */
 
 #include "PVREon.h"
+#include "Globals.h"
 
 #include <algorithm>
 
 #include <kodi/General.h>
-//#include <tinyxml2.h>
 #include "Utils.h"
 #include "rapidjson/document.h"
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
-//#include "Base64.h"
-//#include <tinyxml2.h>
 #include <botan/auto_rng.h>
 #include <botan/cipher_mode.h>
 #include <botan/hex.h>
 #include <botan/rng.h>
 #include <botan/base64.h>
 
-//using namespace tinyxml2;
-//using namespace rapidjson;
-
-//std::string image_url = "https://images-web.ug-be.cdn.united.cloud";
-//std::string eon_api = "https://api-web.ug-be.cdn.united.cloud/";
-std::string player = "m3u8";
-
 /***********************************************************
   * PVR Client AddOn specific public library functions
   ***********************************************************/
-
 
 std::string ltrim(const std::string &s)
 {
@@ -139,7 +129,7 @@ std::string CPVREon::GetDefaultApi()
 
 bool CPVREon::GetDeviceData()
 {
-  std::string url = "https://mojtelemach.ba/gateway/SelfCareAPI/1.0/selfcareapi/TBA/subscriber/" + m_settings->GetSSIdentity() + "/devices/eon/2/product";
+  std::string url = "https://mojtelemach.ba/gateway/SelfCareAPI/1.0/selfcareapi/" + SS_DOMAIN + "/subscriber/" + m_settings->GetSSIdentity() + "/devices/eon/2/product";
 
   std::string jsonString;
   int statusCode = 0;
@@ -161,17 +151,17 @@ bool CPVREon::GetDeviceData()
   {
     const rapidjson::Value& device = (*itr1);
     m_device_serial = Utils::JsonStringOrEmpty(device, "serialNumber");
-    m_device_id = std::to_string(Utils::JsonIntOrZero(doc, "deviceId"));
-    m_device_number = Utils::JsonStringOrEmpty(doc, "deviceNumber");
+    m_device_id = std::to_string(Utils::JsonIntOrZero(device, "id"));
+    m_device_number = Utils::JsonStringOrEmpty(device, "deviceNumber");
     friendly_id = Utils::JsonStringOrEmpty(device, "friendlyId");
     size_t found = friendly_id.find("web");
     if (found != std::string::npos) {
-        kodi::Log(ADDON_LOG_DEBUG, "Got Device Serial Number: %s", m_device_serial.c_str());
+        kodi::Log(ADDON_LOG_DEBUG, "Got Device Serial Number: %s, DeviceID: %s, Device Number: %s", m_device_serial.c_str(), m_device_id.c_str(), m_device_number.c_str());
         return true;
     }
   }
 
-  kodi::Log(ADDON_LOG_DEBUG, "Got Device Serial Number: %s", m_device_serial.c_str());
+  kodi::Log(ADDON_LOG_DEBUG, "Got Device Serial Number: %s, DeviceID: %s, Device Number: %s", m_device_serial.c_str(), m_device_id.c_str(), m_device_number.c_str());
   return true;
 }
 
@@ -180,8 +170,12 @@ bool CPVREon::GetDeviceFromSerial()
   std::string jsonString;
   int statusCode = 0;
 
-  std::string postData = "{\"deviceName\":\"\",\"deviceType\":\"web_linux_chrome\",\"modelName\":\"Chrome 111\",\"platform\":\"web\",\"serial\":\"" + m_device_serial +
-                          "\",\"clientSwVersion\":\"\",\"systemSwVersion\":{\"name\":\"Linux\",\"version\":\"x86_64\"}}";
+  std::string postData = "{\"deviceName\":\"\",\"deviceType\":\"" + DEVICE_TYPE +
+                          "\",\"modelName\":\"" + DEVICE_MODEL +
+                          "\",\"platform\":\"" + DEVICE_PLATFORM +
+                          "\",\"serial\":\"" + m_device_serial +
+                          "\",\"clientSwVersion\":\"\",\"systemSwVersion\":{\"name\":\"" + SYSTEM_SW +
+                          "\",\"version\":\"" + SYSTEM_VERSION + "\"}}";
 
   jsonString = m_httpClient->HttpPost(m_api + "v1/devices", postData, statusCode);
 
@@ -303,7 +297,8 @@ bool CPVREon::GetServiceProvider()
     return false;
   }
   m_service_provider = Utils::JsonStringOrEmpty(doc, "identifier");
-  kodi::Log(ADDON_LOG_DEBUG, "Got Service Provider: %s", m_service_provider.c_str());
+  m_support_web = Utils::JsonStringOrEmpty(doc, "supportWebAddress");
+  kodi::Log(ADDON_LOG_DEBUG, "Got Service Provider: %s and Support Web: %s", m_service_provider.c_str(), m_support_web.c_str());
 
   return true;
 }
@@ -412,6 +407,7 @@ CPVREon::CPVREon() :
     m_api = "https://api-web." + GLOBAL_URL;
     m_images_api = "https://images-web." + GLOBAL_URL;
   }
+  m_httpClient->SetApi(m_api);
   kodi::Log(ADDON_LOG_DEBUG, "API set to: %s", m_api.c_str());
 
   m_device_id = m_settings->GetEonDeviceID();
@@ -448,7 +444,7 @@ CPVREon::CPVREon() :
     }
   }
 
-  if (m_service_provider.empty()) {
+  if (m_service_provider.empty() || m_support_web.empty()) {
     GetServiceProvider();
   }
 
@@ -502,8 +498,9 @@ bool CPVREon::LoadChannels(const bool isRadio)
     return false;
   }
 
-  int lastnumber = 0;
   int currentnumber = 0;
+  int startnumber = m_settings->GetStartNum()-1;
+  int lastnumber = startnumber;
   const rapidjson::Value& channels = doc;
 
   for (rapidjson::Value::ConstValueIterator itr1 = channels.Begin();
@@ -520,12 +517,12 @@ bool CPVREon::LoadChannels(const bool isRadio)
     eon_channel.strChannelName = channame;
     int ref_id = Utils::JsonIntOrZero(channelItem, "id");
 
-    currentnumber = GetDefaultNumber(isRadio, ref_id);
+    currentnumber = startnumber + GetDefaultNumber(isRadio, ref_id);
     if (currentnumber != 0) {
       eon_channel.iChannelNumber = currentnumber;
       lastnumber = currentnumber++;
     } else {
-      eon_channel.iChannelNumber = lastnumber++;
+      eon_channel.iChannelNumber = ++lastnumber;
     }
 
     eon_channel.iUniqueId = ref_id;
@@ -587,8 +584,6 @@ bool CPVREon::HandleSession(bool start, int cid, int epg_id)
   std::string datetime = Utils::TimeToString(timestamp) + "." + ms + "Z";
   std::string offset = Utils::TimeToString(timestamp-300) + "." + ms + "Z";
   kodi::Log(ADDON_LOG_DEBUG, "Handle Session time: %s", datetime.c_str());
-  // [{"time":"2022-01-01T11:08:40.492Z","type":"LIVE","rnd_profile":"hp7000","session_id":"2af8db34-1925-4e71-b188-6f1a00de0c37","action":"start","device":{"id":14254564},"subscriber":{"id":787612},
-  //"offset_time":"2022-01-01T11:08:40.492Z","channel":{"id":73},"epg_event_id":32864575,"viewing_time":0,"silent_event_change":false}]
   std::string action;
   if (start) {
     action = "start";
@@ -596,7 +591,6 @@ bool CPVREon::HandleSession(bool start, int cid, int epg_id)
   else {
     action = "stop";
   }
-  //std::string session_id = "2af8db34-1925-4e71-b188-6f1a00de0c37";
 
   std::string postData = "[{\"time\":\"" + datetime +
                          "\",\"type\":\"CUTV\",\"rnd_profile\":\"hp7000\",\"session_id\":\"" + m_session_id +
@@ -803,11 +797,6 @@ PVR_ERROR CPVREon::GetEPGTagStreamProperties(
   {
     if (channel.iUniqueId == tag.GetUniqueChannelId())
     {
-      /*
-      channel=n1bihba-hd-p-bosaac;stream=hp7000;sp=tmba;u=5q2pbzc5rp9n7of;ss=Br9GqPB3Ghh3Y3DeQkk6Dg;minvbr=100;adaptive=true;
-      player=m3u8;sig=0c7d888a65d737dae628f78565c49f629b295c91a453a0f6b6cdc8fb00ef3df6;session=5df3d7b8-bcd1-483e-979d-e0be38b2e0f8;
-      m=185.79.229.236;device=db43bb2a-8370-4880-837a-bdc9fa999b30;ctime=1681896269492;t=1681790400000;conn=BROWSER;aa=true
-      */
       return GetStreamProperties(channel, properties, tag.GetStartTime(), false);
     }
   }
@@ -895,7 +884,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
                             "stream=" + streaming_profile + ";" + "sp=" + m_service_provider + ";" +
                             "u=" + m_settings->GetEonStreamUser() + ";" +
                             "ss=" + m_settings->GetEonStreamKey() + ";" +
-                            "minvbr=100;adaptive=true;player=" + player + ";" +
+                            "minvbr=100;adaptive=true;player=" + PLAYER + ";" +
                             "sig=" + channel.sig + ";" +
                             "session=" + m_session_id + ";" +
                             "m=" + currentServer.ip + ";" +
@@ -934,7 +923,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
                           "&a=" + urlsafeencode(Botan::base64_encode(pt)) +
                           "&sp=" + m_service_provider +
                           "&u=" + m_settings->GetEonStreamUser() +
-                          "&player=" + player +
+                          "&player=" + PLAYER +
                           "&session=" + m_session_id +
                           "&sig=" + channel.sig;
 

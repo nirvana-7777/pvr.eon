@@ -32,7 +32,7 @@ public:
   const std::string& GetSSAccessToken() const { return m_SS_AccessToken; }
   const std::string& GetSSRefreshToken() const { return m_SS_RefreshToken; }
   const std::string& GetSSIdentity() const { return m_SS_Identity; }
-  const bool HideGeoblocked() const { return m_hidegeoblocked; }
+  const int& GetStartNum() const { return m_start_num; }
   const bool HideUnsubscribed() const { return m_hideunsubscribed; }
   const bool IsTVenabled() const { return m_enabletv; }
   const bool IsRadioenabled() const { return m_enableradio; }
@@ -53,8 +53,8 @@ private:
   std::string m_SS_AccessToken;
   std::string m_SS_RefreshToken;
   std::string m_SS_Identity;
+  int m_start_num;
   bool m_hideunsubscribed;
-  bool m_hidegeoblocked;
   bool m_enabletv;
   bool m_enableradio;
   bool m_enablegroups;
