@@ -1,0 +1,133 @@
+# Kodi Media Center language file
+# Addon Name: PVR Eon
+"Project-Id-Version: KODI Main\n"
+"Report-Msgid-Bugs-To: http://trac.kodi.tv/\n"
+"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: Kodi Translation Team\n"
+"Language-Team: English (United Kingdom) (http://www.transifex.com/projects/p/kodi-main/language/en_GB/)\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en_GB\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "Addon Summary"
+msgid "EON PVR Client"
+msgstr "EON PVR Client"
+
+msgctxt "Addon Description"
+msgid "PVR Client for HRTi platform which allows you to watch live HRT TV channels and listening HRT radio stations."
+msgstr "PVR Client for HRTi platform which allows you to watch live HRT TV channels and listening HRT radio stations."
+
+msgctxt "Addon Disclaimer"
+msgid "Inofficial Addon - Use on own risk"
+msgstr "Inofficial Addon - Use on own risk"
+
+msgctxt "#30000"
+msgid "Username"
+msgstr ""
+
+msgctxt "#30001"
+msgid "Password"
+msgstr ""
+
+msgctxt "#30002"
+msgid "IP Address"
+msgstr ""
+
+msgctxt "#30003"
+msgid "Access Token"
+msgstr ""
+
+msgctxt "#30004"
+msgid "Device ID"
+msgstr ""
+
+msgctxt "#30005"
+msgid "Device Number"
+msgstr ""
+
+msgctxt "#30006"
+msgid "Refresh Token"
+msgstr ""
+
+msgctxt "#30007"
+msgid "Subscriber ID"
+msgstr ""
+
+msgctxt "#30008"
+msgid "Stream Key"
+msgstr ""
+
+msgctxt "#30009"
+msgid "Stream User"
+msgstr ""
+
+msgctxt "#30010"
+msgid "PVR client menu hook item (settings) called."
+msgstr ""
+
+msgctxt "#30011"
+msgid "PVR client menu hook item (all items) called"
+msgstr ""
+
+msgctxt "#30012"
+msgid "PVR client menu hook item (channels) called"
+msgstr ""
+
+msgctxt "#30014"
+msgid "Credentials"
+msgstr ""
+
+msgctxt "#30015"
+msgid "eon.tv"
+msgstr ""
+
+msgctxt "#30020"
+msgid "Hide not subscribed channels"
+msgstr ""
+
+msgctxt "#30021"
+msgid "Hide geoblocked channels"
+msgstr ""
+
+msgctxt "#30022"
+msgid "Enable TV"
+msgstr ""
+
+msgctxt "#30023"
+msgid "Enable radio"
+msgstr ""
+
+msgctxt "#30024"
+msgid "Use categories"
+msgstr ""
+
+msgctxt "#30025"
+msgid "Channels & groups"
+msgstr ""
+
+msgctxt "#30026"
+msgid "Channels"
+msgstr ""
+
+msgctxt "#30027"
+msgid "Self Service Portal"
+msgstr ""
+
+msgctxt "#30028"
+msgid "Self Service Access Token"
+msgstr ""
+
+msgctxt "#30029"
+msgid "Self Service Refresh Token"
+msgstr ""
+
+msgctxt "#30030"
+msgid "Self Service Identity"
+msgstr ""
+
+msgctxt "#30031"
+msgid "Device Serial"
+msgstr ""

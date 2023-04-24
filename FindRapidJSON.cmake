@@ -10,7 +10,7 @@
 #
 
 if(PKG_CONFIG_FOUND)
-  pkg_check_modules(PC_RapidJSON RapidJSON>=1.0.2 QUIET)
+  pkg_check_modules(PC_RapidJSON RapidJSON>=1.0.2)
 endif()
 
 if(CORE_SYSTEM_NAME STREQUAL windows OR CORE_SYSTEM_NAME STREQUAL windowsstore)
@@ -19,7 +19,7 @@ else()
   if(PC_RapidJSON_VERSION)
     set(RapidJSON_VERSION ${PC_RapidJSON_VERSION})
   else()
-    find_package(RapidJSON 1.1.0 CONFIG REQUIRED QUIET)
+    find_package(RapidJSON 1.1.0 CONFIG REQUIRED)
   endif()
 endif()
 
@@ -37,4 +37,3 @@ if(RAPIDJSON_FOUND)
 endif()
 
 mark_as_advanced(RapidJSON_INCLUDE_DIR)
-

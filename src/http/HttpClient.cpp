@@ -1,23 +1,178 @@
 #include "HttpClient.h"
+//#include "../PVREon.h"
 //#include "Cache.h"
 #include <random>
-#include "../md5.h"
+//#include "../md5.h"
 #include <kodi/AddonBase.h>
 #include "../Settings.h"
+#include "rapidjson/document.h"
+#include "../Utils.h"
+#include <botan/hash.h>
+#include <botan/hex.h>
 
-static const std::string HRTI_USER_AGENT = std::string("Kodi/")
-    + std::string(STR(KODI_VERSION)) + std::string(" pvr.hrti/")
-    + std::string(STR(HRTI_VERSION));
-/*
-HttpClient::HttpClient(ParameterDB *parameterDB):
-  m_parameterDB(parameterDB)
+static const std::string EON_USER_AGENT = std::string("Kodi/")
+    + std::string(STR(KODI_VERSION)) + std::string(" pvr.eon/")
+    + std::string(STR(EON_VERSION));
+
+static std::string BROKER_URL = "https://broker.global.united.cloud/";
+
+bool HttpClient::RefreshGenericToken()
 {
-  kodi::Log(ADDON_LOG_INFO, "Using useragent: %s", USER_AGENT.c_str());
+  Curl curl_auth;
 
-  m_uuid = m_parameterDB->Get("uuid");
-  m_zattooSession = m_parameterDB->Get("zattooSession");
+  std::string url = BROKER_URL + "oauth/token?grant_type=client_credentials";
+  std::string postData = "{}";
+
+  // b8d9ade4-1093-46a7-a4f7-0e47be463c10:1w4dmww87x1e9l89essqvc81pidrqsa0li1rva23
+  curl_auth.AddHeader("Authorization", "Basic YjhkOWFkZTQtMTA5My00NmE3LWE0ZjctMGU0N2JlNDYzYzEwOjF3NGRtd3c4N3gxZTlsODllc3NxdmM4MXBpZHJxc2EwbGkxcnZhMjM=");
+
+  int statusCode;
+  std::string content_auth = HttpRequestToCurl(curl_auth, "POST", url, postData, statusCode);
+
+  rapidjson::Document doc;
+  doc.Parse(content_auth.c_str());
+  if (doc.GetParseError())
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh generic access token");
+    return false;
+  }
+
+  std::string access_token = Utils::JsonStringOrEmpty(doc, "access_token");
+
+  if (!access_token.empty()) {
+    m_settings->SetSetting("genericaccesstoken", access_token);
+  }
+
+  kodi::Log(ADDON_LOG_DEBUG, "Got Generic Access Token: %s", access_token.c_str());
+
+  return true;
 }
-*/
+
+bool HttpClient::RefreshSSToken()
+{
+  Curl curl_auth;
+
+  std::string url = "https://mojtelemach.ba/gateway/SCAuthAPI/1.0/scauth/auth/authentication"; //TODO: Fix URL
+  std::string refresh_token = m_settings->GetSSRefreshToken();
+  std::string access_token = m_settings->GetSSAccessToken();
+  std::string username = m_settings->GetEonUsername();
+  std::string password = m_settings->GetEonPassword();
+  std::string postData = "{\"domainId\":\"TBA\""
+                           ",\"applicationId\":\"vpb\""
+                           ",\"grantType\":\"";
+
+  if (!refresh_token.empty()) {
+    postData = postData + "refresh\"" +
+                          ",\"refreshToken\":\"" + refresh_token + "\"}";
+  } else if (!username.empty() && !password.empty()) {
+    postData = postData + "password\"" +
+                          ",\"password\":\"U2FsdGVkX18o+sPA+vov3dp1mbYZznyjDZWWJqIcABo=\"" + //TODO: Fix Password
+                          ",\"username\":\"" + username + "\"}";
+  } else {
+    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh self service token");
+    return false;
+  }
+  //             TODO: webscuser:k4md93!k334f3
+  curl_auth.AddHeader("Authorization", "Basic d2Vic2N1c2VyOms0bWQ5MyFrMzM0ZjM=");
+  curl_auth.AddHeader("Content-Type", "application/json");
+
+  int statusCode;
+  std::string ss_auth = HttpRequestToCurl(curl_auth, "POST", url, postData, statusCode);
+
+  rapidjson::Document doc;
+  doc.Parse(ss_auth.c_str());
+  if (doc.GetParseError())
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh self service token");
+    return false;
+  }
+
+  const rapidjson::Value& credentials = doc["UserTokenAuthenticate"];
+
+  std::string ss_identity = Utils::JsonStringOrEmpty(credentials, "identity");
+  access_token = Utils::JsonStringOrEmpty(credentials, "accessToken");
+  refresh_token = Utils::JsonStringOrEmpty(credentials, "refreshToken");
+
+  if (!refresh_token.empty()) {
+    m_settings->SetSetting("ssrefreshtoken", refresh_token);
+  }
+  if (!access_token.empty()) {
+    m_settings->SetSetting("ssaccesstoken", access_token);
+  }
+  if (!ss_identity.empty()) {
+    m_settings->SetSetting("ssidentity", ss_identity);
+  }
+  kodi::Log(ADDON_LOG_DEBUG, "Got Identity: %s, Access Token: %s, Refresh Token: %s", ss_identity.c_str(), access_token.c_str(), refresh_token.c_str());
+
+  return true;
+}
+
+bool HttpClient::RefreshToken()
+{
+  Curl curl_auth;
+
+  std::string url = "https://api-web.ug-be.cdn.united.cloud/oauth/token?grant_type=";
+  std::string refresh_token = m_settings->GetEonRefreshToken();
+  std::string postData = "{}";
+
+  if (!refresh_token.empty()) {
+    url += "refresh_token&refresh_token=" + refresh_token;
+  }
+  else if ((!m_settings->GetEonUsername().empty()) && (!m_settings->GetEonPassword().empty()) && (!m_settings->GetEonDeviceNumber().empty())) {
+    auto hash = Botan::HashFunction::create("SHA-256");
+    hash->update(m_settings->GetEonUsername());
+    std::string user_hash = Botan::hex_encode(hash->final());
+
+    std::string password = m_settings->GetEonPassword();
+    std::string device_number = m_settings->GetEonDeviceNumber();
+
+    std::string boundary = "----WebKitFormBoundary2VHeBtQPpnSo3SjK";
+    curl_auth.AddHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+
+    postData = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"username\"\r\n\r\n" + user_hash + "\r\n--"
+                    + boundary + "\r\nContent-Disposition: form-data; name=\"password\"\r\n\r\n" + password + "\r\n--"
+                    + boundary + "\r\nContent-Disposition: form-data; name=\"device_number\"\r\n\r\n" + device_number + "\r\n--"
+                    + boundary + "--";
+
+    url += "password";
+  }
+  else {
+    url = BROKER_URL + "oauth/token?grant_type=client_credentials";
+  }
+
+  int statusCode;
+
+  curl_auth.AddHeader("Authorization", "Basic YjhkOWFkZTQtMTA5My00NmE3LWE0ZjctMGU0N2JlNDYzYzEwOjF3NGRtd3c4N3gxZTlsODllc3NxdmM4MXBpZHJxc2EwbGkxcnZhMjM=");
+  std::string content_auth = HttpRequestToCurl(curl_auth, "POST", url, postData, statusCode);
+
+  rapidjson::Document doc;
+  doc.Parse(content_auth.c_str());
+  if (doc.GetParseError())
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh token");
+    return false;
+  }
+
+  std::string access_token = Utils::JsonStringOrEmpty(doc, "access_token");
+  refresh_token = Utils::JsonStringOrEmpty(doc, "refresh_token");
+  std::string stream_key = Utils::JsonStringOrEmpty(doc, "stream_key");
+  std::string stream_un = Utils::JsonStringOrEmpty(doc, "stream_un");
+
+  m_settings->SetSetting("accesstoken", access_token);
+  if (!refresh_token.empty()) {
+    m_settings->SetSetting("refreshtoken", refresh_token);
+  }
+  if (!stream_key.empty()) {
+    m_settings->SetSetting("streamkey", stream_key);
+  }
+  if (!stream_un.empty()) {
+    m_settings->SetSetting("streamuser", stream_un);
+  }
+
+  return true;
+}
+
+
 HttpClient::HttpClient(CSettings* settings):
   m_settings(settings)
 {
@@ -103,18 +258,42 @@ std::string HttpClient::HttpPost(const std::string& url, const std::string& post
 std::string HttpClient::HttpRequest(const std::string& action, const std::string& url, const std::string& postData, int &statusCode)
 {
   Curl curl;
-  std::string ipaddress = m_settings->GetHrtiIpAddress();
-  std::string token = m_settings->GetHrtiToken();
-  std::string deviceid = m_settings->GetHrtiDeviceID();
 
-  curl.AddHeader("Authorization", "Client " + token);
-  curl.AddHeader("User-Agent", HRTI_USER_AGENT);
-  curl.AddHeader("Devicetypeid", "6");
-  curl.AddHeader("Deviceid", deviceid);
-  curl.AddHeader("Ipaddress", ipaddress);
-//  curl.AddHeader("Origin", HRTI_DOMAIN);
-  curl.AddHeader("Operatorreferenceid", "hrt");
+  std::string access_token = m_settings->GetEonAccessToken();
+
+//  if (found != std::string::npos) {
+//    curl.AddHeader("Content-Type", "multipart/form-data; boundary=----WebKitFormBoundary2VHeBtQPpnSo3SjK");
+//    curl.AddHeader("Authorization", "Basic YjhkOWFkZTQtMTA5My00NmE3LWE0ZjctMGU0N2JlNDYzYzEwOjF3NGRtd3c4N3gxZTlsODllc3NxdmM4MXBpZHJxc2EwbGkxcnZhMjM=");
+//  }
+//  else {
+  curl.AddHeader("User-Agent", EON_USER_AGENT);
+
+  size_t found = url.find("mojtelemach.ba");
+  if (found != std::string::npos) {
+    //             webscuser:k4md93!k334f3
+    access_token = m_settings->GetSSAccessToken();
+    if (!access_token.empty()) {
+      curl.AddHeader("accesstoken", access_token);
+    }
+    curl.AddHeader("Authorization", "Basic d2Vic2N1c2VyOms0bWQ5MyFrMzM0ZjM=");
+  } else {
+    found = url.find(BROKER_URL);
+    if (found != std::string::npos) {
+      access_token = m_settings->GetGenericAccessToken();
+    }
+    if (!access_token.empty()) {
+      curl.AddHeader("Authorization", "bearer " + access_token);
+    } else {
+      curl.AddHeader("Authorization", "Basic YjhkOWFkZTQtMTA5My00NmE3LWE0ZjctMGU0N2JlNDYzYzEwOjF3NGRtd3c4N3gxZTlsODllc3NxdmM4MXBpZHJxc2EwbGkxcnZhMjM=");
+    }
+  }
   curl.AddHeader("Content-Type", "application/json");
+
+  found = url.find("/events/epg");
+  if (found != std::string::npos) {
+    curl.AddHeader("x-ucp-time-format", "timestamp");
+  }
+//  curl.AddHeader("Accept", "application/json, text/plain, */*");
 /*
   curl.AddOption("acceptencoding", "gzip,deflate");
 
@@ -142,6 +321,32 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
   curl.AddHeader("User-Agent", USER_AGENT);
 */
   std::string content = HttpRequestToCurl(curl, action, url, postData, statusCode);
+
+  if (statusCode == 401) {
+    Curl curl_reauth;
+    size_t found = url.find("mojtelemach.ba");
+    if (found != std::string::npos) {
+      if (RefreshSSToken()) {
+        access_token = m_settings->GetSSAccessToken();
+        curl_reauth.AddHeader("accesstoken", access_token);
+        curl_reauth.AddHeader("Authorization", "Basic d2Vic2N1c2VyOms0bWQ5MyFrMzM0ZjM=");
+      }
+    } else {
+      found = url.find(BROKER_URL);
+      bool refresh_successful;
+      if (found != std::string::npos) {
+        refresh_successful = RefreshGenericToken();
+        access_token = m_settings->GetGenericAccessToken();
+      } else {
+        refresh_successful = RefreshToken();
+        access_token = m_settings->GetEonAccessToken();
+      }
+      if (refresh_successful) {
+        curl_reauth.AddHeader("Authorization", "bearer " + access_token);
+      }
+    }
+    content = HttpRequestToCurl(curl_reauth, action, url, postData, statusCode);
+  }
 
   if (statusCode >= 400 || statusCode < 200) {
     kodi::Log(ADDON_LOG_ERROR, "Open URL failed with %i.", statusCode);

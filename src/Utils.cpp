@@ -158,6 +158,24 @@ std::string Utils::JsonStringOrEmpty(const rapidjson::Value& jsonValue, const ch
   return jsonValue[fieldName].GetString();
 }
 
+double Utils::JsonDoubleOrZero(const rapidjson::Value& jsonValue, const char* fieldName)
+{
+  if (!jsonValue.HasMember(fieldName) || !jsonValue[fieldName].IsDouble())
+  {
+    return 0;
+  }
+  return jsonValue[fieldName].GetDouble();
+}
+
+int64_t Utils::JsonInt64OrZero(const rapidjson::Value& jsonValue, const char* fieldName)
+{
+  if (!jsonValue.HasMember(fieldName) || !jsonValue[fieldName].IsInt64())
+  {
+    return 0;
+  }
+  return jsonValue[fieldName].GetInt64();
+}
+
 int Utils::JsonIntOrZero(const rapidjson::Value& jsonValue, const char* fieldName)
 {
   if (!jsonValue.HasMember(fieldName) || !jsonValue[fieldName].IsInt())

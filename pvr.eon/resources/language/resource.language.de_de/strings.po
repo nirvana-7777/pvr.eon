@@ -1,6 +1,6 @@
 # Kodi Media Center language file
-# Addon Name: PVR Hrti Client
-# Addon id: pvr.hrti
+# Addon Name: PVR EON Client
+# Addon id: pvr.eon
 # Addon Provider: Pulse-Eight Ltd.
 msgid ""
 msgstr ""
@@ -17,8 +17,8 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
 
 msgctxt "Addon Summary"
-msgid "Hrti PVR Client"
-msgstr "Hrti PVR Client"
+msgid "EON PVR Client"
+msgstr "EON PVR Client"
 
 msgctxt "Addon Description"
 msgid "PVR Client for HRTi platform which allows you to watch live HRT TV channels and listening HRT radio stations."
@@ -45,24 +45,44 @@ msgid "IP Address"
 msgstr "IP Adresse"
 
 msgctxt "#30003"
-msgid "Token"
-msgstr "Token"
+msgid "Access Token"
+msgstr "Access Token"
 
 msgctxt "#30004"
 msgid "Device ID"
-msgstr "Device ID"
+msgstr "Geraete ID"
+
+msgctxt "#30005"
+msgid "Device Number"
+msgstr "Geraetenummer"
+
+msgctxt "#30006"
+msgid "Refresh Token"
+msgstr "Refresh Token"
+
+msgctxt "#30007"
+msgid "Subscriber ID"
+msgstr "Subscriber ID"
+
+msgctxt "#30008"
+msgid "Stream Key"
+msgstr "Stream Schluessel"
+
+msgctxt "#30009"
+msgid "Stream User"
+msgstr "Stream Nutzer"
 
 #. Settings category label
 #: pvr.hrti/resources/settings.xml
 msgctxt "#30014"
-msgid "Hrti"
-msgstr "Hrti"
+msgid "Credentials"
+msgstr "Zugangsdaten"
 
 #. Settings group label
 #: pvr.hrti/resources/settings.xml
 msgctxt "#30015"
-msgid "Credentials"
-msgstr "Zugangsdaten"
+msgid "eon.tv"
+msgstr "eon.tv"
 
 msgctxt "#30010"
 msgid "PVR client menu hook item (settings) called."
@@ -75,3 +95,51 @@ msgstr ""
 msgctxt "#30012"
 msgid "PVR client menu hook item (channels) called"
 msgstr ""
+
+msgctxt "#30020"
+msgid "Hide not subscribed channels"
+msgstr "Nur abonnierte Sender anzeigen"
+
+msgctxt "#30021"
+msgid "Hide geoblocked channels"
+msgstr "Geo-blockierte Sender nicht anzeigen"
+
+msgctxt "#30022"
+msgid "Enable TV"
+msgstr "TV Sender anzeigen"
+
+msgctxt "#30023"
+msgid "Enable radio"
+msgstr "Radio Sender anzeigen"
+
+msgctxt "#30024"
+msgid "Use categories"
+msgstr "Provider Gruppen anzeigen"
+
+msgctxt "#30025"
+msgid "Channels & groups"
+msgstr "Sender und Gruppen"
+
+msgctxt "#30026"
+msgid "Channels"
+msgstr "Sender"
+
+msgctxt "#30027"
+msgid "Self Service Portal"
+msgstr "Self Service Portal"
+
+msgctxt "#30028"
+msgid "Self Service Access Token"
+msgstr "Self Service Access Token"
+
+msgctxt "#30029"
+msgid "Self Service Refresh Token"
+msgstr "Self Service Refresh Token"
+
+msgctxt "#30030"
+msgid "Self Service Identity"
+msgstr "Self Service Identity"
+
+msgctxt "#30031"
+msgid "Device Serial"
+msgstr "Geraeteseriennummer"

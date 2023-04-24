@@ -18,16 +18,44 @@ public:
   ADDON_STATUS SetSetting(const std::string& settingName, const std::string& settingValue);
   bool VerifySettings();
 
-  const std::string& GetHrtiUsername() const { return m_hrtiUsername; }
-  const std::string& GetHrtiPassword() const { return m_hrtiPassword; }
-  const std::string& GetHrtiIpAddress() const { return m_hrtiIpAddress; }
-  const std::string& GetHrtiToken() const { return m_hrtiToken; }
-  const std::string& GetHrtiDeviceID() const { return m_hrtiDeviceID; }
+  const std::string& GetEonUsername() const { return m_eonUsername; }
+  const std::string& GetEonPassword() const { return m_eonPassword; }
+  const std::string& GetEonAccessToken() const { return m_eonAccessToken; }
+  const std::string& GetEonRefreshToken() const { return m_eonRefreshToken; }
+  const std::string& GetEonDeviceNumber() const { return m_eonDeviceNumber; }
+  const std::string& GetEonDeviceID() const { return m_eonDeviceID; }
+  const std::string& GetEonDeviceSerial() const { return m_eonDeviceSerial; }
+  const std::string& GetEonSubscriberID() const { return m_eonSubscriberID; }
+  const std::string& GetEonStreamKey() const { return m_eonStreamKey; }
+  const std::string& GetEonStreamUser() const { return m_eonStreamUser; }
+  const std::string& GetGenericAccessToken() const { return m_Generic_AccessToken; }
+  const std::string& GetSSAccessToken() const { return m_SS_AccessToken; }
+  const std::string& GetSSRefreshToken() const { return m_SS_RefreshToken; }
+  const std::string& GetSSIdentity() const { return m_SS_Identity; }
+  const bool HideGeoblocked() const { return m_hidegeoblocked; }
+  const bool HideUnsubscribed() const { return m_hideunsubscribed; }
+  const bool IsTVenabled() const { return m_enabletv; }
+  const bool IsRadioenabled() const { return m_enableradio; }
+  const bool IsGroupsenabled() const  { return m_enablegroups; }
 
 private:
-  std::string m_hrtiUsername;
-  std::string m_hrtiPassword;
-  std::string m_hrtiIpAddress;
-  std::string m_hrtiToken;
-  std::string m_hrtiDeviceID;
+  std::string m_eonUsername;
+  std::string m_eonPassword;
+  std::string m_eonAccessToken;
+  std::string m_eonRefreshToken;
+  std::string m_eonDeviceNumber;
+  std::string m_eonDeviceID;
+  std::string m_eonDeviceSerial;
+  std::string m_eonSubscriberID;
+  std::string m_eonStreamKey;
+  std::string m_eonStreamUser;
+  std::string m_Generic_AccessToken;
+  std::string m_SS_AccessToken;
+  std::string m_SS_RefreshToken;
+  std::string m_SS_Identity;
+  bool m_hideunsubscribed;
+  bool m_hidegeoblocked;
+  bool m_enabletv;
+  bool m_enableradio;
+  bool m_enablegroups;
 };

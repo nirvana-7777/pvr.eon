@@ -15,6 +15,10 @@ public:
   std::string HttpGet(const std::string& url, int &statusCode);
   std::string HttpDelete(const std::string& url, int &statusCode);
   std::string HttpPost(const std::string& url, const std::string& postData, int &statusCode);
+//  bool GetDeviceFromSerial();
+  bool RefreshToken();
+  bool RefreshSSToken();
+  bool RefreshGenericToken();
   void ClearSession();
   std::string GetUUID();
    void SetStatusCodeHandler(HttpStatusCodeHandler* statusCodeHandler) {

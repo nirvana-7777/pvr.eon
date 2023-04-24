@@ -14,30 +14,79 @@
 #include "http/HttpClient.h"
 #include "rapidjson/document.h"
 
-static std::string HRTI_DOMAIN = "https://hrti.hrt.hr";
-static std::string HRTI_API = HRTI_DOMAIN + "/api/api/ott/";
-static std::string MY_MERCHANT = "aviion2";
-static std::string AVIION_DOMAIN = "https://hsapi.aviion.tv";
-static std::string AVIION_API = AVIION_DOMAIN + "/Client.svc/json/";
+static std::string GLOBAL_URL = "global.united.cloud/";
+static std::string BROKER_URL = "https://broker." + GLOBAL_URL;
 
-struct HrtiChannel
+struct EonChannel
 {
   bool bRadio;
   bool bArchive;
   int iUniqueId;
-  std::string referenceID; // HRTI_ID
+//  int referenceID; // EON_ID
   int iChannelNumber; //position
   std::string strChannelName;
   std::string strIconPath;
-  std::string strStreamURL;
+  std::string publishingPoint;
+  std::vector<uint8_t> profileIds;
+  std::string sig;
+  bool aaEnabled;
+  bool subscribed;
+//  std::string strStreamURL;
 };
 
-class ATTR_DLL_LOCAL CPVRHrti : public kodi::addon::CAddonBase,
+struct EonServer
+{
+  std::string id;
+  std::string ip;
+  std::string hostname;
+};
+
+struct EonEvent
+{
+  std::string time;
+  std::string type;
+  std::string rnd_profile;
+  std::string session_id;
+  std::string device_id;
+  std::string subscriber_id;
+  std::string offset_time;
+  std::string channel_id;
+  std::string epd_id;
+};
+
+struct EonRenderingProfile
+{
+  int id;
+  std::string name;
+  std::string coreStreamId;
+  int height;
+  int width;
+  int audioBitrate;
+  int videoBitrate;
+};
+
+struct EonCategoryChannel
+{
+  int id;
+  int position;
+};
+
+struct EonCategory
+{
+  std::string name;
+  int id;
+  int order;
+  std::vector<EonCategoryChannel> channels;
+  bool isRadio;
+  bool isDefault;
+};
+
+class ATTR_DLL_LOCAL CPVREon : public kodi::addon::CAddonBase,
                                 public kodi::addon::CInstancePVRClient
 {
 public:
-  CPVRHrti();
-  ~CPVRHrti() override;
+  CPVREon();
+  ~CPVREon() override;
 
   PVR_ERROR GetBackendName(std::string& name) override;
   PVR_ERROR GetBackendVersion(std::string& version) override;
@@ -91,26 +140,70 @@ public:
 
 protected:
   std::string GetRecordingURL(const kodi::addon::PVRRecording& recording);
-  bool GetChannel(const kodi::addon::PVRChannel& channel, HrtiChannel& myChannel);
+  bool GetChannel(const kodi::addon::PVRChannel& channel, EonChannel& myChannel);
+  bool GetServer(bool isLive, EonServer& myServer);
 
 private:
   PVR_ERROR CallMenuHook(const kodi::addon::PVRMenuhook& menuhook);
 
   void SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,
                            const std::string& url,
-                           bool realtime, bool playTimeshiftBuffer, const std::string& license);
+                           bool realtime, bool playTimeshiftBuffer,
+                           const std::string& license);
 
-  std::vector<HrtiChannel> m_channels;
+ PVR_ERROR GetStreamProperties(
+   const EonChannel& channel,
+   std::vector<kodi::addon::PVRStreamProperty>& properties, int starttime, bool isLive);
 
+  std::vector<EonChannel> m_channels;
+  std::vector<EonServer> m_live_servers;
+  std::vector<EonServer> m_timeshift_servers;
+  std::vector<EonRenderingProfile> m_rendering_profiles;
+  std::vector<EonCategory> m_categories;
+/*
   std::string m_drmid;
   std::string m_sessionid;
   std::string m_ipaddress;
-  std::string m_token;
   std::string m_deviceid;
+*/
+//  std::string m_access_token;
+//  std::string m_refresh_token;
+//  std::string m_token_type;
+  std::string m_device_id;
+  std::string m_device_number;
+  std::string m_device_serial;
+  std::string m_subscriber_id;
+  std::string m_session_id;
+  std::string m_stream_key;
+  std::string m_stream_un;
+  std::string m_service_provider;
+  std::string m_api;
+  std::string m_images_api;
+//  std::string m_ss_access;
+  std::string m_ss_identity;
+//  std::string m_ss_refresh;
+//  int m_active_profile_id;
+//  int m_expires_in;
 
   HttpClient *m_httpClient;
   CSettings* m_settings;
 
+  std::string GetTime();
+  int getBitrate(const bool isRadio, const int id);
+  std::string getCoreStreamId(const int id);
+  std::string GetDefaultApi();
+//  bool SelfServiceLogin();
+  bool GetDeviceData();
+  bool GetDeviceFromSerial();
+  bool GetHouseholds();
+  bool GetServers();
+  bool GetServiceProvider();
+  bool GetRenderingProfiles();
+  bool LoadChannels(const bool isRadio);
+  bool GetCategories(const bool isRadio);
+  int GetDefaultNumber(const bool isRadio, int id);
+  bool HandleSession(bool start, int cid, int epg_id);
+/*
   bool HrtiLogin();
   bool GetIpAddress();
   bool GrantAccess();
@@ -118,7 +211,9 @@ private:
   bool LoadChannels();
   bool AuthorizeSession(std::string ref_id, std::string drm_id);
   std::string GetLicense(std::string drm_id, std::string user_id);
+*/
 //  std::string ltrim(const std::string &s);
 //  std::string rtrim(const std::string &s);
 //  std::string trim(const std::string &s);
+//  std::string urlencode(const std::string &s);
 };
