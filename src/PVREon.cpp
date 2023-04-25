@@ -129,7 +129,7 @@ std::string CPVREon::GetDefaultApi()
 
 bool CPVREon::GetDeviceData()
 {
-  std::string url = "https://mojtelemach.ba/gateway/SelfCareAPI/1.0/selfcareapi/" + SS_DOMAIN + "/subscriber/" + m_settings->GetSSIdentity() + "/devices/eon/2/product";
+  std::string url = SS_PORTAL + "/gateway/SelfCareAPI/1.0/selfcareapi/" + SS_DOMAIN + "/subscriber/" + m_settings->GetSSIdentity() + "/devices/eon/2/product";
 
   std::string jsonString;
   int statusCode = 0;
