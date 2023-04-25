@@ -5,6 +5,9 @@ endif()
 find_path(BOTAN_INCLUDE_DIRS NAMES botan/botan.h
                                 PATHS ${CMAKE_PREFIX_PATH}/include/botan-2)
 
+find_path(BOTAN_INCLUDE_DIRS NAMES botan/botan.h
+                                PATHS ${CMAKE_PREFIX_PATH}/include/botan-2)
+
 find_library(BOTAN_LIBRARIES NAMES libbotan-2.a
                PATHS ${CMAKE_PREFIX_PATH}/lib)
 
@@ -12,6 +15,9 @@ find_library(BOTAN_LIBRARIES NAMES libbotan-2.a
 #  set(BOTAN_INCLUDE_DIRS ${BOTAN_INCLUDE_DIR})
 #  set(BOTAN_LIBRARIES ${BOTAN_LIBRARY})
 #endif()
+
+set(BOTAN_INCLUDE_DIRS ${ADDON_DEPENDS_PATH}/include/botan-2)
+set(BOTAN_LIBRARIES ${ADDON_DEPENDS_PATH}/lib/libbotan-2.a)
 
 mark_as_advanced(BOTAN_INCLUDE_DIRS BOTAN_LIBRARIES)
 
