@@ -14,8 +14,6 @@ externalproject_add(botan
 #                      --cc-bin=${CMAKE_CXX_COMPILER}
                       --ar-command=${CMAKE_AR}
                       --cpu=${CMAKE_SYSTEM_PROCESSOR}
-#                      --cc-bin=/home/basti/source/android-tools/android-ndk-r21e/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang++#
-#                      --ar-command=/home/basti/source/android-tools/android-ndk-r21e/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android-ar
 #                       --minimized-build
 #                       --enable-modules=aes,cbc,base64,auto_rng,rng,hex,sha2_32,sha2_64,sha3
                        --extra-cxxflags=-fPIC
