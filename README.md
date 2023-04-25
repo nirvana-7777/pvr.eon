@@ -34,6 +34,7 @@ This is the EON.tv PVR client addon for Kodi. It provides Kodi integration for t
 
 ##### Useful links
 
+* [Kodinerds Support Thread](https://www.kodinerds.net/thread/77069-release-pvr-eon-tv/)
 * [Kodi's PVR user support](https://forum.kodi.tv/forumdisplay.php?fid=167)
 * [Kodi's PVR development support](https://forum.kodi.tv/forumdisplay.php?fid=136)
 
