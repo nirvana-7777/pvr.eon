@@ -26,7 +26,6 @@ endif()
 find_path(RapidJSON_INCLUDE_DIR NAMES rapidjson/rapidjson.h
                                 PATHS ${PC_RapidJSON_INCLUDEDIR})
 
-
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(RapidJSON
                                   REQUIRED_VARS RapidJSON_INCLUDE_DIR RapidJSON_VERSION

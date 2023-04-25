@@ -54,7 +54,7 @@ bool HttpClient::RefreshSSToken()
 {
   Curl curl_auth;
 
-  std::string url = "https://mojtelemach.ba/gateway/SCAuthAPI/1.0/scauth/auth/authentication"; //TODO: Fix URL
+  std::string url = SS_PORTAL + "/gateway/SCAuthAPI/1.0/scauth/auth/authentication"; //TODO: Fix URL
   std::string refresh_token = m_settings->GetSSRefreshToken();
   std::string access_token = m_settings->GetSSAccessToken();
   std::string username = m_settings->GetEonUsername();
@@ -278,7 +278,7 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
 //  else {
   curl.AddHeader("User-Agent", EON_USER_AGENT);
 
-  size_t found = url.find("mojtelemach.ba");
+  size_t found = url.find(SS_PORTAL);
   if (found != std::string::npos) {
     //             webscuser:k4md93!k334f3
     access_token = m_settings->GetSSAccessToken();
@@ -313,7 +313,7 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
 
   if (statusCode == 401) {
     Curl curl_reauth;
-    size_t found = url.find("mojtelemach.ba");
+    size_t found = url.find(SS_PORTAL);
     if (found != std::string::npos) {
       if (RefreshSSToken()) {
         access_token = m_settings->GetSSAccessToken();

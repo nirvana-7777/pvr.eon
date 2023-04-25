@@ -7,7 +7,7 @@ language: cpp
 #
 env:
   global:
-    - app_id=pvr.demo
+    - app_id=pvr.eon
 
 matrix:
   include:
@@ -51,6 +51,6 @@ before_script:
   - if [[ $DEBIAN_BUILD == true ]]; then wget https://raw.githubusercontent.com/xbmc/xbmc/master/xbmc/addons/kodi-dev-kit/tools/debian-addon-package-test.sh && chmod +x ./debian-addon-package-test.sh; fi
   - if [[ $DEBIAN_BUILD == true ]]; then sudo apt-get build-dep $TRAVIS_BUILD_DIR; fi
 
-script: 
+script:
   - if [[ $DEBIAN_BUILD != true ]]; then make; fi
   - if [[ $DEBIAN_BUILD == true ]]; then ./debian-addon-package-test.sh $TRAVIS_BUILD_DIR; fi
