@@ -14,6 +14,20 @@
 #include "http/HttpClient.h"
 #include "rapidjson/document.h"
 
+struct EonChannelCategory
+{
+  int id;
+  bool primary;
+};
+
+struct EonPublishingPoint
+{
+  std::string publishingPoint;
+  std::string audioLanguage;
+  std::string subtitleLanguage;
+  std::vector<uint8_t> profileIds;
+};
+
 struct EonChannel
 {
   bool bRadio;
@@ -23,8 +37,8 @@ struct EonChannel
   int iChannelNumber; //position
   std::string strChannelName;
   std::string strIconPath;
-  std::string publishingPoint;
-  std::vector<uint8_t> profileIds;
+  std::vector<EonChannelCategory> categories;
+  std::vector<EonPublishingPoint> publishingPoints;
   std::string sig;
   bool aaEnabled;
   bool subscribed;

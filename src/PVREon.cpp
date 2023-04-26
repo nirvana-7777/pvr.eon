@@ -529,6 +529,19 @@ bool CPVREon::LoadChannels(const bool isRadio)
 
     eon_channel.aaEnabled = Utils::JsonBoolOrFalse(channelItem, "aaEnabled");
     eon_channel.subscribed = Utils::JsonBoolOrFalse(channelItem, "subscribed");
+    const rapidjson::Value& categories = channelItem["categories"];
+    for (rapidjson::Value::ConstValueIterator itr2 = categories.Begin();
+        itr2 != categories.End(); ++itr2)
+    {
+      const rapidjson::Value& categoryItem = (*itr2);
+
+      EonChannelCategory cat;
+
+      cat.id = Utils::JsonIntOrZero(categoryItem, "id");
+      cat.primary = Utils::JsonBoolOrFalse(categoryItem, "primary");
+
+      eon_channel.categories.emplace_back(cat);
+    }
     const rapidjson::Value& images = channelItem["images"];
     for (rapidjson::Value::ConstValueIterator itr2 = images.Begin();
         itr2 != images.End(); ++itr2)
@@ -545,13 +558,17 @@ bool CPVREon::LoadChannels(const bool isRadio)
     {
       const rapidjson::Value& ppItem = (*itr2);
 
-      eon_channel.publishingPoint = Utils::JsonStringOrEmpty(ppItem, "publishingPoint");
+      EonPublishingPoint pp;
+
+      pp.publishingPoint = Utils::JsonStringOrEmpty(ppItem, "publishingPoint");
+      pp.audioLanguage =  Utils::JsonStringOrEmpty(ppItem, "audioLanguage");
+      pp.subtitleLanguage =  Utils::JsonStringOrEmpty(ppItem, "subtitleLanguage");
 
       const rapidjson::Value& profileIds = ppItem["profileIds"];
       for (rapidjson::Value::ConstValueIterator itr3 = profileIds.Begin();
           itr3 != profileIds.End(); ++itr3)
       {
-        eon_channel.profileIds.emplace_back(itr3->GetInt());
+        pp.profileIds.emplace_back(itr3->GetInt());
       }
 
       const rapidjson::Value& playerCfgs = ppItem["playerCfgs"];
@@ -563,7 +580,7 @@ bool CPVREon::LoadChannels(const bool isRadio)
           eon_channel.sig = Utils::JsonStringOrEmpty(playerCfgItem, "sig");
         }
       }
-
+      eon_channel.publishingPoints.emplace_back(pp);
     }
 
     if (!m_settings->HideUnsubscribed() || eon_channel.subscribed) {
@@ -630,10 +647,11 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
   properties.emplace_back(PVR_STREAM_PROPERTY_INPUTSTREAM, "inputstream.adaptive");
   properties.emplace_back(PVR_STREAM_PROPERTY_ISREALTIMESTREAM, realtime ? "true" : "false");
 
-  // MPEG DASH
   kodi::Log(ADDON_LOG_DEBUG, "[PLAY STREAM] hls");
   properties.emplace_back("inputstream.adaptive.manifest_type", "hls");
   properties.emplace_back(PVR_STREAM_PROPERTY_MIMETYPE, "application/x-mpegURL");
+  properties.emplace_back("inputstream.adaptive.original_audio_language", "bs");
+  properties.emplace_back("inputstream.adaptive.stream_selection_type", "adaptive");
 
 //  properties.emplace_back("inputstream.adaptive.license_type", "com.widevine.alpha");
 //  properties.emplace_back("inputstream.adaptive.license_key",
@@ -860,10 +878,10 @@ PVR_ERROR CPVREon::GetStreamProperties(
     unsigned int rndbitrate = 0;
     unsigned int current_bitrate = 0;
     unsigned int current_id = 0;
-    for (unsigned int i = 0; i < channel.profileIds.size(); i++) {
-        current_bitrate = getBitrate(channel.bRadio, channel.profileIds[i]);
+    for (unsigned int i = 0; i < channel.publishingPoints[0].profileIds.size(); i++) {
+        current_bitrate = getBitrate(channel.bRadio, channel.publishingPoints[0].profileIds[i]);
         if (current_bitrate > rndbitrate) {
-          current_id = channel.profileIds[i];
+          current_id = channel.publishingPoints[0].profileIds[i];
           rndbitrate = current_bitrate;
         }
     }
@@ -880,7 +898,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
 
     GetServer(isLive, currentServer);
 
-    std::string plain_aes = "channel=" + channel.publishingPoint + ";" +
+    std::string plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
                             "stream=" + streaming_profile + ";" + "sp=" + m_service_provider + ";" +
                             "u=" + m_settings->GetEonStreamUser() + ";" +
                             "ss=" + m_settings->GetEonStreamKey() + ";" +
@@ -1115,11 +1133,13 @@ bool CPVREon::GetChannel(const kodi::addon::PVRChannel& channel, EonChannel& myC
 //      myChannel.referenceID = thisChannel.referenceID;
       myChannel.strChannelName = thisChannel.strChannelName;
       myChannel.strIconPath = thisChannel.strIconPath;
-      myChannel.publishingPoint = thisChannel.publishingPoint;
+      myChannel.publishingPoints = thisChannel.publishingPoints;
+      myChannel.categories = thisChannel.categories;
+//      mychannel.subtitleLanguage = thisChannel.subtitleLanguage;
       myChannel.sig = thisChannel.sig;
       myChannel.aaEnabled = thisChannel.aaEnabled;
       myChannel.subscribed = thisChannel.subscribed;
-      myChannel.profileIds = thisChannel.profileIds;
+//      myChannel.profileIds = thisChannel.profileIds;
 //      myChannel.strStreamURL = thisChannel.strStreamURL;
 
       return true;
