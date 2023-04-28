@@ -9,7 +9,7 @@ externalproject_add(botan
                       --enable-static
                       --disable-shared
                       --os=${CORE_SYSTEM_NAME}
-#                      --cc-bin=${CMAKE_CXX_COMPILER}
+                      --cc-bin=${CMAKE_CXX_COMPILER}
                       --ar-command=${CMAKE_AR}
                       --cpu=${CMAKE_SYSTEM_PROCESSOR}
 #                       --minimized-build

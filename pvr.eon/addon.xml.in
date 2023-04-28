@@ -4,15 +4,17 @@
   version="20.5.0"
   name="EON PVR Client"
   provider-name="Nirvana">
-  <requires>@ADDON_DEPENDS@</requires>
-  <extension
-    point="kodi.pvrclient"
-    library_@PLATFORM@="@LIBRARY_FILENAME@"/>
+  <requires>
+    @ADDON_DEPENDS@
+    <import addon="inputstream.adaptive" minversion="2.4.2"/>
+    <import addon="script.module.inputstreamhelper" version="0.5.8"/>
+  </requires>
+  <extension point="kodi.pvrclient" library_@PLATFORM@="@LIBRARY_FILENAME@"/>
   <extension point="xbmc.addon.metadata">
     <platform>@PLATFORM@</platform>
     <license>GPL-2.0-or-later</license>
     <source>https://github.com/nirvana-7777/pvr.eon</source>
-    <forum>https://www.kodinerds.net/thread/77069-release-pvr-eon-tv/</forum>
+    <forum>https://www.kodinerds.net/thread/77069-release-pvr-eon-tv</forum>
     <assets>
       <icon>icon.png</icon>
     </assets>
