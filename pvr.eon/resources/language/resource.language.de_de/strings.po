@@ -151,3 +151,31 @@ msgstr "Generisches Access Token"
 msgctxt "#30033"
 msgid "First channel number"
 msgstr "Erste Sendernummer"
+
+msgctxt "#30034"
+msgid "Service Provider"
+msgstr "Service Provider"
+
+msgctxt "#30035"
+msgid "SBB"
+msgstr "SBB"
+
+msgctxt "#30036"
+msgid "Telemach"
+msgstr "Telemach"
+
+msgctxt "#30037"
+msgid "NetTV Plus"
+msgstr "NetTV Plus"
+
+msgctxt "#30038"
+msgid "Vivacom"
+msgstr "Vivacom"
+
+msgctxt "#30039"
+msgid "EON Hrvatska"
+msgstr "EON Hrvatska"
+
+msgctxt "#30040"
+msgid "Nova"
+msgstr "Nova"

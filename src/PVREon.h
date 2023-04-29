@@ -92,6 +92,14 @@ struct EonCategory
   bool isDefault;
 };
 
+struct EonCDN
+{
+  int id;
+  std::string identifier;
+  std::string baseApi;
+  bool isDefault;
+};
+
 class ATTR_DLL_LOCAL CPVREon : public kodi::addon::CAddonBase,
                                 public kodi::addon::CInstancePVRClient
 {
@@ -171,6 +179,7 @@ private:
   std::vector<EonServer> m_timeshift_servers;
   std::vector<EonRenderingProfile> m_rendering_profiles;
   std::vector<EonCategory> m_categories;
+  std::vector<EonCDN> m_cdns;
 /*
   std::string m_drmid;
   std::string m_sessionid;
@@ -205,7 +214,9 @@ private:
   std::string GetTime();
   int getBitrate(const bool isRadio, const int id);
   std::string getCoreStreamId(const int id);
-  std::string GetDefaultApi();
+  std::string GetBaseApi(const std::string& cdn_identifier);
+  std::string GetBrandIdentifier();
+  bool GetCDNInfo();
 //  bool SelfServiceLogin();
   bool GetDeviceData();
   bool GetDeviceFromSerial();

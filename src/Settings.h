@@ -18,6 +18,7 @@ public:
   ADDON_STATUS SetSetting(const std::string& settingName, const std::string& settingValue);
   bool VerifySettings();
 
+  const int& GetEonServiceProvider() const { return m_eonServiceProvider; }
   const std::string& GetEonUsername() const { return m_eonUsername; }
   const std::string& GetEonPassword() const { return m_eonPassword; }
   const std::string& GetEonAccessToken() const { return m_eonAccessToken; }
@@ -39,6 +40,7 @@ public:
   const bool IsGroupsenabled() const  { return m_enablegroups; }
 
 private:
+  int m_eonServiceProvider;
   std::string m_eonUsername;
   std::string m_eonPassword;
   std::string m_eonAccessToken;

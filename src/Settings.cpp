@@ -143,6 +143,13 @@ bool CSettings::Load()
     return false;
   }
 
+  if (!kodi::addon::CheckSettingInt("provider", m_eonServiceProvider))
+  {
+    /* If setting is unknown fallback to defaults */
+    kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'provider' setting");
+    return false;
+  }
+
   return true;
 }
 

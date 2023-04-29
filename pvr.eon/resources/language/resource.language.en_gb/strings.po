@@ -139,3 +139,31 @@ msgstr ""
 msgctxt "#30033"
 msgid "First channel number"
 msgstr ""
+
+msgctxt "#30034"
+msgid "Service Provider"
+msgstr ""
+
+msgctxt "#30035"
+msgid "SBB"
+msgstr ""
+
+msgctxt "#30036"
+msgid "Telemach"
+msgstr ""
+
+msgctxt "#30037"
+msgid "NetTV Plus"
+msgstr ""
+
+msgctxt "#30038"
+msgid "Vivacom"
+msgstr ""
+
+msgctxt "#30039"
+msgid "EON Hrvatska"
+msgstr ""
+
+msgctxt "#30040"
+msgid "Nova"
+msgstr ""

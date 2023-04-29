@@ -98,7 +98,59 @@ int CPVREon::GetDefaultNumber(const bool isRadio, int id) {
   return 0;
 }
 
-std::string CPVREon::GetDefaultApi()
+std::string CPVREon::GetBaseApi(const std::string& cdn_identifier) {
+
+  for(int i=0; i < m_cdns.size(); i++){
+    if (m_cdns[i].identifier == cdn_identifier) {
+      return m_cdns[i].baseApi;
+/*
+      for (int j=0; j < m_cdns[i].domains.size(); j++){
+        if (m_cdns[i].domains[j].name == "baseApi") {
+          return m_cdns[i].domains[j].be;
+        }
+      }
+*/
+    }
+  }
+
+  return "";
+}
+
+std::string CPVREon::GetBrandIdentifier()
+{
+  std::string jsonString;
+  int statusCode = 0;
+
+  jsonString = m_httpClient->HttpGet(BROKER_URL + "v2/brands", statusCode);
+
+  rapidjson::Document doc;
+  doc.Parse(jsonString.c_str());
+  if (doc.GetParseError())
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Failed to get brands");
+    return "";
+  }
+
+  int i = 0;
+  int sp_id = m_settings->GetEonServiceProvider();
+  kodi::Log(ADDON_LOG_DEBUG, "Requested Service Provider ID:%u", sp_id);
+
+  const rapidjson::Value& brands = doc;
+
+  for (rapidjson::Value::ConstValueIterator itr1 = brands.Begin();
+      itr1 != brands.End(); ++itr1)
+  {
+    if (i == sp_id) {
+      const rapidjson::Value& brandItem = (*itr1);
+      return Utils::JsonStringOrEmpty(brandItem, "cdnIdentifier");
+    }
+    i++;
+  }
+
+  return "";
+}
+
+bool CPVREon::GetCDNInfo()
 {
   std::string jsonString;
   int statusCode = 0;
@@ -110,7 +162,7 @@ std::string CPVREon::GetDefaultApi()
   if (doc.GetParseError())
   {
     kodi::Log(ADDON_LOG_ERROR, "Failed to get cdninfo");
-    return "";
+    return false;
   }
   const rapidjson::Value& cdns = doc;
 
@@ -118,13 +170,20 @@ std::string CPVREon::GetDefaultApi()
       itr1 != cdns.End(); ++itr1)
   {
     const rapidjson::Value& cdnItem = (*itr1);
-    if (Utils::JsonBoolOrFalse(cdnItem, "isDefault")) {
-      const rapidjson::Value& baseApi = cdnItem["domains"]["baseApi"];
-      return Utils::JsonStringOrEmpty(baseApi, "be");
-    }
+
+    EonCDN cdn;
+
+    cdn.id = Utils::JsonIntOrZero(cdnItem, "id");
+    cdn.identifier = Utils::JsonStringOrEmpty(cdnItem, "identifier");
+    cdn.isDefault = Utils::JsonBoolOrFalse(cdnItem, "isDefault");
+
+    const rapidjson::Value& baseApi = cdnItem["domains"]["baseApi"];
+
+    cdn.baseApi = Utils::JsonStringOrEmpty(baseApi, "be");
+    m_cdns.emplace_back(cdn);
   }
 
-  return "";
+  return true;
 }
 
 bool CPVREon::GetDeviceData()
@@ -399,10 +458,12 @@ CPVREon::CPVREon() :
   m_settings->Load();
   m_httpClient = new HttpClient(m_settings);
 
-  std::string default_api = GetDefaultApi();
-  if (!default_api.empty()) {
-    m_api = "https://api-web." + default_api + "/";
-    m_images_api = "https://images-web." + default_api + "/";
+  if (GetCDNInfo()) {
+    std::string cdn_identifier = GetBrandIdentifier();
+    kodi::Log(ADDON_LOG_DEBUG, "CDN Identifier: %s", cdn_identifier.c_str());
+    std::string baseApi = GetBaseApi(cdn_identifier);
+    m_api = "https://api-web." + baseApi + "/";
+    m_images_api = "https://images-web." + baseApi + "/";
   } else {
     m_api = "https://api-web." + GLOBAL_URL;
     m_images_api = "https://images-web." + GLOBAL_URL;
