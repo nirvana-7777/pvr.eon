@@ -33,7 +33,7 @@ jobs:
         repository: xbmc/xbmc
         ref: master
         path: xbmc
-    - name: Checkout pvr.zattoo repo
+    - name: Checkout pvr.eon repo
       uses: actions/checkout@v2
       with:
         path: ${{ env.app_id }}
