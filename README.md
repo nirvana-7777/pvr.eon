@@ -32,7 +32,7 @@ This is the EON.tv PVR client addon for Kodi. It provides Kodi integration for t
 
 ## Notes
 
-- Tested building it for Linux and Android / x86 and aarch64 (manually switch in depends/botan)
+- Tested building it for Linux and Android / x86 and aarch64
 - Only tested Telemach.ba, but other should work as well or should be easy to fix
 
 ##### Useful links
