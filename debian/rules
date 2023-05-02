@@ -16,4 +16,4 @@ override_dh_auto_configure:
 	dh_auto_configure -- -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_SHARED_LIBS=1 -DUSE_LTO=1
 
 override_dh_installdocs:
-	dh_installdocs --link-doc=kodi-pvr-demo
+	dh_installdocs --link-doc=kodi-pvr-eon

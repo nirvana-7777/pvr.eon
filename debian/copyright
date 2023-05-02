@@ -1,6 +1,6 @@
 Format: http://dep.debian.net/deps/dep5
-Upstream-Name: pvr.demo
-Source: https://github.com/kodi-pvr/pvr.demo
+Upstream-Name: pvr.eon
+Source: https://github.com/nirvana-7777/pvr.eon
 
 Files: *
 Copyright: 2011 Pulse-Eight
@@ -43,4 +43,3 @@ License: GPL-2+
  .
  On Debian systems, the complete text of the GNU General
  Public License version 2 can be found in "/usr/share/common-licenses/GPL-2".
-
