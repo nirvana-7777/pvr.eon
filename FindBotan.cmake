@@ -1,19 +1,22 @@
 if(PKG_CONFIG_FOUND)
-  pkg_check_modules(PC_BOTAN botan-2)
+  pkg_check_modules(PC_Botan botan-2)
 endif()
 
-#find_path(BOTAN_INCLUDE_DIRS NAMES botan/botan.h
-#                                PATHS ${CMAKE_PREFIX_PATH}/include/botan-2)
+find_path(Botan_INCLUDE_DIR NAMES botan/botan.h
+                                PATHS ${ADDON_DEPENDS_PATH}/include/botan-2
+                                /usr/include
+                                /usr/local/include)
 
-find_path(BOTAN_INCLUDE_DIRS NAMES botan/botan.h
-                                PATHS ${PC_BOTAN_INCLUDEDIR})
-
-find_library(BOTAN_LIBRARIES NAMES libbotan-2.a
+find_library(Botan_LIBRARY NAMES libbotan-2.a
                PATHS ${CMAKE_PREFIX_PATH}/lib)
 
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(Botan
+                REQUIRED_VARS Botan_LIBRARY Botan_INCLUDE_DIR)
+
 if(BOTAN_FOUND)
-  set(BOTAN_INCLUDE_DIRS ${BOTAN_INCLUDE_DIR})
-  set(BOTAN_LIBRARIES ${BOTAN_LIBRARY})
+  set(BOTAN_INCLUDE_DIRS ${Botan_INCLUDE_DIR})
+  set(BOTAN_LIBRARIES ${Botan_LIBRARY})
 else ()
   set(BOTAN_INCLUDE_DIRS ${ADDON_DEPENDS_PATH}/include/botan-2)
   set(BOTAN_LIBRARIES ${ADDON_DEPENDS_PATH}/lib/libbotan-2.a)
