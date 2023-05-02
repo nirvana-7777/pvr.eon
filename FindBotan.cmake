@@ -4,8 +4,8 @@ endif()
 
 find_path(Botan_INCLUDE_DIR NAMES botan/botan.h
                                 PATHS ${ADDON_DEPENDS_PATH}/include/botan-2
-                                /usr/include
-                                /usr/local/include)
+                                /usr/include/botan-2
+                                /usr/local/include/botan-2)
 
 find_library(Botan_LIBRARY NAMES libbotan-2.a
                PATHS ${CMAKE_PREFIX_PATH}/lib)
