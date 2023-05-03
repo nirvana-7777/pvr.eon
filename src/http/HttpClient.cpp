@@ -324,9 +324,8 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
         curl_reauth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
       }
     } else {
-      found = url.find(BROKER_URL);
       bool refresh_successful;
-      if (found != std::string::npos) {
+      if (url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos) {
         refresh_successful = RefreshGenericToken();
         access_token = m_settings->GetGenericAccessToken();
       } else {
