@@ -1,4 +1,5 @@
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL%20v2+-blue.svg)](LICENSE.md)
+[![Build and run tests](https://github.com/nirvana-7777/pvr.eon/actions/workflows/build.yml/badge.svg?branch=Nexus)](https://github.com/nirvana-7777/pvr.eon/actions/workflows/build.yml)
 
 # EON.tv PVR client for Kodi
 This is the EON.tv PVR client addon for Kodi. It provides Kodi integration for the streaming provider [EON.tv](https://eon.tv). A user account / paid subscription is required to use this addon. Please create the user account outside of this addon. Please enter the username/password to the configuration of this addon. Some content is geo-blocked.
