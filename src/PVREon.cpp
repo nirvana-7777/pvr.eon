@@ -481,11 +481,13 @@ CPVREon::CPVREon() :
   }
 
   if (m_device_id.empty() || m_device_number.empty()) {
+/*
     if (GetDeviceData()) {
       m_settings->SetSetting("deviceid", m_device_id);
       m_settings->SetSetting("devicenumber", m_device_number);
       m_settings->SetSetting("deviceserial", m_device_serial);
     }
+*/    
     m_device_serial = m_settings->GetEonDeviceSerial();
     if (m_device_serial.empty()) {
       std::string m_device_serial = m_httpClient->GetUUID();

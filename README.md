@@ -35,6 +35,8 @@ This is the EON.tv PVR client addon for Kodi. It provides Kodi integration for t
 
 - Tested building it for Linux and Android / x86 and aarch64
 - Only tested Telemach.ba, but other should work as well or should be easy to fix
+- Depends on inputstream addon
+- Fast forward and rewind won't work in Replay TV because that is handled via specific servers which inputstream does not support
 
 ##### Useful links
 

@@ -1,8 +1,6 @@
 #include "HttpClient.h"
 #include "../Globals.h"
-//#include "Cache.h"
 #include <random>
-//#include "../md5.h"
 #include <kodi/AddonBase.h>
 #include "../Settings.h"
 #include "rapidjson/document.h"
@@ -129,6 +127,8 @@ bool HttpClient::RefreshToken()
 
     std::string password = m_settings->GetEonPassword();
     std::string device_number = m_settings->GetEonDeviceNumber();
+
+    kodi::Log(ADDON_LOG_DEBUG, "Using Device Number %s to login", device_number.c_str());
 
     std::string boundary = "----WebKitFormBoundary2VHeBtQPpnSo3SjK";
     curl_auth.AddHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
@@ -268,19 +268,12 @@ std::string HttpClient::HttpPost(const std::string& url, const std::string& post
 std::string HttpClient::HttpRequest(const std::string& action, const std::string& url, const std::string& postData, int &statusCode)
 {
   Curl curl;
+  std::string access_token;
 
-  std::string access_token = m_settings->GetEonAccessToken();
-
-//  if (found != std::string::npos) {
-//    curl.AddHeader("Content-Type", "multipart/form-data; boundary=----WebKitFormBoundary2VHeBtQPpnSo3SjK");
-//    curl.AddHeader("Authorization", "Basic YjhkOWFkZTQtMTA5My00NmE3LWE0ZjctMGU0N2JlNDYzYzEwOjF3NGRtd3c4N3gxZTlsODllc3NxdmM4MXBpZHJxc2EwbGkxcnZhMjM=");
-//  }
-//  else {
   curl.AddHeader("User-Agent", EON_USER_AGENT);
 
   size_t found = url.find(SS_PORTAL);
   if (found != std::string::npos) {
-    //             webscuser:k4md93!k334f3
     access_token = m_settings->GetSSAccessToken();
     if (!access_token.empty()) {
       curl.AddHeader("accesstoken", access_token);
@@ -292,6 +285,8 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
   } else {
     if (url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos) {
       access_token = m_settings->GetGenericAccessToken();
+    } else {
+      access_token = m_settings->GetEonAccessToken();
     }
     if (!access_token.empty()) {
       curl.AddHeader("Authorization", "bearer " + access_token);
