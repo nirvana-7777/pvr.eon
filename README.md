@@ -1,5 +1,5 @@
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL%20v2+-blue.svg)](LICENSE.md)
-[![Build and run tests](https://github.com/nirvana-7777/pvr.eon/actions/workflows/build.yml/badge.svg?branch=Nexus)](https://github.com/nirvana-7777/pvr.eon/actions/workflows/build.yml)
+[![Build and run tests](https://github.com/nirvana-7777/pvr.eon/actions/workflows/build.yml/badge.svg?branch=Omega)](https://github.com/nirvana-7777/pvr.eon/actions/workflows/build.yml)
 
 # EON.tv PVR client for Kodi
 This is the EON.tv PVR client addon for Kodi. It provides Kodi integration for the streaming provider [EON.tv](https://eon.tv). A user account / paid subscription is required to use this addon. Please create the user account outside of this addon. Please enter the username/password to the configuration of this addon. Some content is geo-blocked.
@@ -24,7 +24,7 @@ This is the EON.tv PVR client addon for Kodi. It provides Kodi integration for t
 
 1. `git clone --branch master https://github.com/xbmc/xbmc.git`
 2. `mkdir -p xbmc/cmake/addons/addons/pvr.eon/`
-3. `echo "pvr.eon https://github.com/nirvana-7777/pvr.eon Nexus" > xbmc/cmake/addons/addons/pvr.eon/pvr.eon.txt`
+3. `echo "pvr.eon https://github.com/nirvana-7777/pvr.eon Omega" > xbmc/cmake/addons/addons/pvr.eon/pvr.eon.txt`
 4. `echo "all" > xbmc/cmake/addons/addons/pvr.eon/platforms.txt`
 5. `git clone https://github.com/nirvana-7777/pvr.eon.git`
 6. `cd pvr.eon && mkdir build && cd build`
