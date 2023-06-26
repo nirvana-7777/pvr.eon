@@ -1,0 +1,7 @@
+v20.5.0
+- Initial release
+v20.6.0
+- Migrate from botan towards native AES and SHA256 implementations for:
+  - better portability
+  - faster compilation
+  - less dependencies
