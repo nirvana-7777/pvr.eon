@@ -16,11 +16,6 @@
 #include "rapidjson/document.h"
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
-//#include <botan/auto_rng.h>
-//#include <botan/cipher_mode.h>
-//#include <botan/hex.h>
-//#include <botan/rng.h>
-//#include <botan/base64.h>
 #include "Base64.h"
 
 #define CBC 1
