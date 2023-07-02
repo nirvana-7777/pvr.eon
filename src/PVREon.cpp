@@ -16,11 +16,14 @@
 #include "rapidjson/document.h"
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
-#include <botan/auto_rng.h>
-#include <botan/cipher_mode.h>
-#include <botan/hex.h>
-#include <botan/rng.h>
-#include <botan/base64.h>
+#include "Base64.h"
+
+#define CBC 1
+
+#include "aes.hpp"
+#include "pkcs7_padding.hpp"
+
+static const uint8_t block_size = 16;
 
 /***********************************************************
   * PVR Client AddOn specific public library functions
@@ -58,6 +61,71 @@ std::string urlsafedecode(const std::string &s) {
 //  t.erase(std::remove( t.begin(), t.end(), '='),
 //              t.end()); // remove padding
   return t;
+}
+
+std::string string_to_hex(const std::string& input)
+{
+    static const char hex_digits[] = "0123456789ABCDEF";
+
+    std::string output;
+    output.reserve(input.length() * 2);
+    for (unsigned char c : input)
+    {
+        output.push_back(hex_digits[c >> 4]);
+        output.push_back(hex_digits[c & 15]);
+    }
+    return output;
+}
+
+std::string aes_encrypt_cbc(const std::string &iv_str, const std::string &key, const std::string &plaintext)
+{
+    uint8_t i;
+
+    int dlen = strlen(plaintext.c_str());
+    int klen = strlen(key.c_str());
+
+    //Proper Length of plaintext
+    int dlenu = dlen;
+    if (dlen % block_size) {
+        dlenu += block_size - (dlen % block_size);
+        kodi::Log(ADDON_LOG_DEBUG, "The original length of the plaintext is = %d and the length of the padded plaintext is = %d", dlen, dlenu);
+    }
+
+    // Make the uint8_t arrays
+    uint8_t hexarray[dlenu];
+    uint8_t kexarray[klen];
+    uint8_t iv[klen];
+
+    // Initialize them with zeros
+    memset( hexarray, 0, dlenu );
+    memset( kexarray, 0, klen );
+    memset( iv, 0, klen );
+
+    // Fill the uint8_t arrays
+    for (int i=0;i<dlen;i++) {
+        hexarray[i] = (uint8_t)plaintext[i];
+    }
+    for (int i=0;i<klen;i++) {
+        kexarray[i] = (uint8_t)key[i];
+        iv[i] = (uint8_t)iv_str[i];
+    }
+
+    pkcs7_padding_pad_buffer( hexarray, dlen, sizeof(hexarray), block_size );
+
+    //start the encryption
+    struct AES_ctx ctx;
+    AES_init_ctx_iv(&ctx, kexarray, iv);
+
+    // encrypt
+    AES_CBC_encrypt_buffer(&ctx, hexarray, dlenu);
+
+    std::ostringstream convert;
+    for (int i = 0; i < dlenu; i++) {
+        convert << hexarray[i];
+    }
+    std::string output = convert.str();
+
+    return output;
 }
 
 int CPVREon::getBitrate(const bool isRadio, const int id) {
@@ -458,6 +526,8 @@ CPVREon::CPVREon() :
   m_settings->Load();
   m_httpClient = new HttpClient(m_settings);
 
+  srand(time(nullptr));
+
   if (GetCDNInfo()) {
     std::string cdn_identifier = GetBrandIdentifier();
     kodi::Log(ADDON_LOG_DEBUG, "CDN Identifier: %s", cdn_identifier.c_str());
@@ -487,7 +557,7 @@ CPVREon::CPVREon() :
       m_settings->SetSetting("devicenumber", m_device_number);
       m_settings->SetSetting("deviceserial", m_device_serial);
     }
-*/    
+*/
     m_device_serial = m_settings->GetEonDeviceSerial();
     if (m_device_serial.empty()) {
       std::string m_device_serial = m_httpClient->GetUUID();
@@ -977,31 +1047,25 @@ PVR_ERROR CPVREon::GetStreamProperties(
     plain_aes = plain_aes + "conn=BROWSER;aa=" + (channel.aaEnabled ? "true" : "false");
     kodi::Log(ADDON_LOG_DEBUG, "Plain AES -> %s", plain_aes.c_str());
 
-    Botan::AutoSeeded_RNG rng;
+    std::string key = base64_decode(urlsafedecode(m_settings->GetEonStreamKey()));
 
-    Botan::secure_vector<uint8_t> key = Botan::base64_decode(urlsafedecode(m_settings->GetEonStreamKey()));
+    std::ostringstream convert;
+    for (int i = 0; i < block_size; i++) {
+        convert << (uint8_t) rand();
+    }
+    std::string iv_str = convert.str();
 
-    auto enc = Botan::Cipher_Mode::create("AES-128/CBC/PKCS7", Botan::Cipher_Dir::ENCRYPTION);
-    enc->set_key(key);
+    std::string enc_str = aes_encrypt_cbc(iv_str, key, plain_aes);
 
-    // generate fresh nonce (IV)
-    Botan::secure_vector<uint8_t> iv = rng.random_vec(enc->default_nonce_length());
-
-    // Copy input data to a buffer that will be encrypted
-    Botan::secure_vector<uint8_t> pt(plain_aes.data(), plain_aes.data() + plain_aes.length());
-
-    enc->start(iv);
-    enc->finish(pt);
-
-    kodi::Log(ADDON_LOG_DEBUG, "IV -> %s", Botan::hex_encode(iv).c_str());
-    kodi::Log(ADDON_LOG_DEBUG, "IV (base64) -> %s", urlsafeencode(Botan::base64_encode(iv)).c_str());
-    kodi::Log(ADDON_LOG_DEBUG, "Key -> %s", Botan::hex_encode(key).c_str());
-    kodi::Log(ADDON_LOG_DEBUG, "Encrypted -> %s", Botan::hex_encode(pt).c_str());
-    kodi::Log(ADDON_LOG_DEBUG, "Encrypted (base64) -> %s", urlsafeencode(Botan::base64_encode(pt)).c_str());
+    kodi::Log(ADDON_LOG_DEBUG, "IV -> %s", string_to_hex(iv_str).c_str());
+    kodi::Log(ADDON_LOG_DEBUG, "IV (base64) -> %s", urlsafeencode(base64_encode(iv_str.c_str(), iv_str.length())).c_str());
+    kodi::Log(ADDON_LOG_DEBUG, "Key -> %s", string_to_hex(key).c_str());
+    kodi::Log(ADDON_LOG_DEBUG, "Encrypted -> %s", string_to_hex(enc_str).c_str());
+    kodi::Log(ADDON_LOG_DEBUG, "Encrypted (base64) -> %s", urlsafeencode(base64_encode(enc_str.c_str(), enc_str.length())).c_str());
 
     std::string enc_url = "https://" + currentServer.hostname +
-                          "/stream?i=" + urlsafeencode(Botan::base64_encode(iv)) +
-                          "&a=" + urlsafeencode(Botan::base64_encode(pt)) +
+                          "/stream?i=" + urlsafeencode(base64_encode(iv_str.c_str(), iv_str.length())) +
+                          "&a=" + urlsafeencode(base64_encode(enc_str.c_str(), enc_str.length())) +
                           "&sp=" + m_service_provider +
                           "&u=" + m_settings->GetEonStreamUser() +
                           "&player=" + PLAYER +

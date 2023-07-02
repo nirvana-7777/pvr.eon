@@ -5,9 +5,9 @@
 #include "../Settings.h"
 #include "rapidjson/document.h"
 #include "../Utils.h"
-#include <botan/hash.h>
-#include <botan/hex.h>
-#include <botan/base64.h>
+//#include <botan/base64.h>
+#include "../SHA256.h"
+#include "../Base64.h"
 
 void HttpClient::SetApi(const std::string& api)
 {
@@ -23,8 +23,12 @@ bool HttpClient::RefreshGenericToken()
 
   std::string basic_token = CLIENT_ID + ":" + CLIENT_SECRET;
   // Copy input data to a buffer that will be encrypted
-  Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
-  curl_auth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+//  Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+//  std::string test1 = base64_encode(basic_token.c_str(), basic_token.length());
+//  kodi::Log(ADDON_LOG_DEBUG, "Base64: %s", test1.c_str());
+//  curl_auth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+  curl_auth.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
+
 
   int statusCode;
   std::string content_auth = HttpRequestToCurl(curl_auth, "POST", url, postData, statusCode);
@@ -74,8 +78,9 @@ bool HttpClient::RefreshSSToken()
   }
   std::string basic_token = SS_USER + ":" + SS_SECRET;
   // Copy input data to a buffer that will be encrypted
-  Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
-  curl_auth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+//  Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+//  curl_auth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+  curl_auth.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
   curl_auth.AddHeader("Content-Type", "application/json");
 
   int statusCode;
@@ -121,9 +126,20 @@ bool HttpClient::RefreshToken()
     url += "refresh_token&refresh_token=" + refresh_token;
   }
   else if ((!m_settings->GetEonUsername().empty()) && (!m_settings->GetEonPassword().empty()) && (!m_settings->GetEonDeviceNumber().empty())) {
+/*
     auto hash = Botan::HashFunction::create("SHA-256");
     hash->update(m_settings->GetEonUsername());
-    std::string user_hash = Botan::hex_encode(hash->final());
+    std::string user_hash1 = Botan::hex_encode(hash->final());
+    kodi::Log(ADDON_LOG_DEBUG, "SHA256 %s", user_hash1.c_str());
+*/
+    SHA256 sha;
+    sha.update(m_settings->GetEonUsername());
+    uint8_t * digest = sha.digest();
+    std::string user_hash = SHA256::toString(digest);
+    std::transform(user_hash.begin(), user_hash.end(), user_hash.begin(), ::toupper);
+    kodi::Log(ADDON_LOG_DEBUG, "SHA256 %s", user_hash.c_str());
+
+    delete[] digest;
 
     std::string password = m_settings->GetEonPassword();
     std::string device_number = m_settings->GetEonDeviceNumber();
@@ -150,8 +166,9 @@ bool HttpClient::RefreshToken()
 
   std::string basic_token = CLIENT_ID + ":" + CLIENT_SECRET;
   // Copy input data to a buffer that will be encrypted
-  Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
-  curl_auth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+//  Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+//  curl_auth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+  curl_auth.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
 
   std::string content_auth = HttpRequestToCurl(curl_auth, "POST", url, postData, statusCode);
 
@@ -280,8 +297,9 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
     }
     std::string basic_token = SS_USER + ":" + SS_SECRET;
     // Copy input data to a buffer that will be encrypted
-    Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
-    curl.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+//    Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+//    curl.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+    curl.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
   } else {
     if (url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos) {
       access_token = m_settings->GetGenericAccessToken();
@@ -293,8 +311,9 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
     } else {
       std::string basic_token = CLIENT_ID + ":" + CLIENT_SECRET;
       // Copy input data to a buffer that will be encrypted
-      Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
-      curl.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+//      Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+//      curl.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+      curl.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
     }
   }
   curl.AddHeader("Content-Type", "application/json");
@@ -315,8 +334,9 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
         curl_reauth.AddHeader("accesstoken", access_token);
         std::string basic_token = SS_USER + ":" + SS_SECRET;
         // Copy input data to a buffer that will be encrypted
-        Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
-        curl_reauth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+//        Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
+//        curl_reauth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
+        curl_reauth.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
       }
     } else {
       bool refresh_successful;

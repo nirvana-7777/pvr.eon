@@ -1,2 +1,8 @@
-v21.0.0
-- Initial version for Omega
+v21.5.0
+- Initial release
+v21.6.0
+- Migrate from botan towards native AES and SHA256 implementations for:
+  - better portability
+  - faster compilation
+  - less dependencies
+
