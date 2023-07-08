@@ -1,10 +1,11 @@
-v20.5.0
+v21.5.0
 - Initial release
-v20.6.0
+v21.6.0
 - Migrate from botan towards native AES and SHA256 implementations for:
   - better portability
   - faster compilation
   - less dependencies
-v20.6.1
+v21.6.1
   - Switch from adaptive to manual-osd for inputstream
   - Fix not subscribed channels leading to crash
+
