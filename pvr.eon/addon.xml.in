@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addon
   id="pvr.eon"
-  version="21.6.0"
+  version="21.6.1"
   name="EON PVR Client"
   provider-name="Nirvana">
   <requires>

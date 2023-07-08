@@ -783,8 +783,9 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
   kodi::Log(ADDON_LOG_DEBUG, "[PLAY STREAM] hls");
   properties.emplace_back("inputstream.adaptive.manifest_type", "hls");
   properties.emplace_back(PVR_STREAM_PROPERTY_MIMETYPE, "application/x-mpegURL");
-  properties.emplace_back("inputstream.adaptive.original_audio_language", "bs");
-  properties.emplace_back("inputstream.adaptive.stream_selection_type", "adaptive");
+//  properties.emplace_back("inputstream.adaptive.original_audio_language", "bs");
+//  properties.emplace_back("inputstream.adaptive.stream_selection_type", "adaptive");
+  properties.emplace_back("inputstream.adaptive.stream_selection_type", "manual-osd");
 
 //  properties.emplace_back("inputstream.adaptive.license_type", "com.widevine.alpha");
 //  properties.emplace_back("inputstream.adaptive.license_key",
@@ -1006,6 +1007,7 @@ PVR_ERROR CPVREon::GetChannels(bool bRadio, kodi::addon::PVRChannelsResultSet& r
 PVR_ERROR CPVREon::GetStreamProperties(
     const EonChannel& channel, std::vector<kodi::addon::PVRStreamProperty>& properties, int starttime, bool isLive)
 {
+    kodi::Log(ADDON_LOG_DEBUG, "function call: [%s]", __FUNCTION__);
     std::string streaming_profile = "hp7000";
 
     unsigned int rndbitrate = 0;
@@ -1084,9 +1086,15 @@ PVR_ERROR CPVREon::GetChannelStreamProperties(
 {
   kodi::Log(ADDON_LOG_DEBUG, "function call: [%s]", __FUNCTION__);
   EonChannel addonChannel;
-  GetChannel(channel, addonChannel);
-
-  return GetStreamProperties(addonChannel, properties, 0, true);
+  if (GetChannel(channel, addonChannel)) {
+    if (addonChannel.subscribed) {
+        return GetStreamProperties(addonChannel, properties, 0, true);
+    }
+    kodi::Log(ADDON_LOG_DEBUG, "Channel not subscribed");
+    return PVR_ERROR_SERVER_ERROR;
+  }
+  kodi::Log(ADDON_LOG_DEBUG, "Channel not found");
+  return PVR_ERROR_SERVER_ERROR;
 }
 
 PVR_ERROR CPVREon::GetChannelGroupsAmount(int& amount)
@@ -1246,6 +1254,7 @@ PVR_ERROR CPVREon::CallMenuHook(const kodi::addon::PVRMenuhook& menuhook)
 
 bool CPVREon::GetChannel(const kodi::addon::PVRChannel& channel, EonChannel& myChannel)
 {
+  kodi::Log(ADDON_LOG_DEBUG, "function call: [%s]", __FUNCTION__);
   for (const auto& thisChannel : m_channels)
   {
 
