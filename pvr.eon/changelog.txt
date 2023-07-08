@@ -5,3 +5,6 @@ v20.6.0
   - better portability
   - faster compilation
   - less dependencies
+v20.6.1
+  - Switch from adaptive to manual-osd for inputstream
+  - Fix not subscribed channels leading to crash
