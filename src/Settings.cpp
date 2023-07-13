@@ -150,6 +150,13 @@ bool CSettings::Load()
     return false;
   }
 
+  if (!kodi::addon::CheckSettingInt("platform", m_eonPlatform))
+  {
+    /* If setting is unknown fallback to defaults */
+    kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'platform' setting");
+    return false;
+  }
+
   return true;
 }
 

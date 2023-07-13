@@ -31,6 +31,8 @@ private:
   std::string GenerateUUID();
   std::string m_uuid;
   std::string m_api;
+  std::string client_id;
+  std::string client_secret;
   CSettings* m_settings;
   HttpStatusCodeHandler *m_statusCodeHandler = nullptr;
 };

@@ -8,3 +8,5 @@ v20.6.0
 v20.6.1
   - Switch from adaptive to manual-osd for inputstream
   - Fix not subscribed channels leading to crash
+v20.7.0
+  - Add Android TV platform (e.g. BigScreen/4K)

@@ -25,7 +25,7 @@ struct EonPublishingPoint
   std::string publishingPoint;
   std::string audioLanguage;
   std::string subtitleLanguage;
-  std::vector<uint8_t> profileIds;
+  std::vector<int> profileIds;
 };
 
 struct EonChannel
@@ -100,6 +100,21 @@ struct EonCDN
   bool isDefault;
 };
 
+struct EonParameters
+{
+  std::string api_prefix;
+  std::string api_selector;
+  std::string device_type;
+  std::string device_mac;
+  std::string device_name;
+  std::string device_model;
+  std::string device_platform;
+  std::string client_sw_version;
+  std::string client_sw_build;
+  std::string system_sw;
+  std::string system_version;
+};
+
 class ATTR_DLL_LOCAL CPVREon : public kodi::addon::CAddonBase,
                                 public kodi::addon::CInstancePVRClient
 {
@@ -170,9 +185,11 @@ private:
                            bool realtime, bool playTimeshiftBuffer,
                            const std::string& license);
 
- PVR_ERROR GetStreamProperties(
-   const EonChannel& channel,
-   std::vector<kodi::addon::PVRStreamProperty>& properties, int starttime, bool isLive);
+  PVR_ERROR GetStreamProperties(
+    const EonChannel& channel,
+    std::vector<kodi::addon::PVRStreamProperty>& properties, int starttime, bool isLive);
+
+  bool Parametrize(const int id);
 
   std::vector<EonChannel> m_channels;
   std::vector<EonServer> m_live_servers;
@@ -210,6 +227,7 @@ private:
 
   HttpClient *m_httpClient;
   CSettings* m_settings;
+  EonParameters m_parameters;
 
   std::string GetTime();
   int getBitrate(const bool isRadio, const int id);

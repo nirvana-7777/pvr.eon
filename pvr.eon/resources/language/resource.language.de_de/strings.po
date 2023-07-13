@@ -179,3 +179,19 @@ msgstr "EON Hrvatska"
 msgctxt "#30040"
 msgid "Nova"
 msgstr "Nova"
+
+msgctxt "#30041"
+msgid "Plattform"
+msgstr ""
+
+msgctxt "#30042"
+msgid "Web"
+msgstr ""
+
+msgctxt "#30043"
+msgid "Android TV"
+msgstr ""
+
+msgctxt "#30044"
+msgid "WebOS"
+msgstr ""

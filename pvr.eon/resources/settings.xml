@@ -19,6 +19,18 @@
           </constraints>
           <control type="list" format="integer" />
 		    </setting>
+        <setting id="platform" type="integer" label="30041">
+          <level>0</level>
+          <default>0</default>
+          <constraints>
+            <options>
+              <option label="30042">0</option> <!-- Web -->
+              <option label="30043">1</option> <!-- Android-TV -->
+              <option label="30044">2</option> <!-- LG WebOS -->
+            </options>
+          </constraints>
+          <control type="list" format="integer" />
+		    </setting>
         <setting id="username" type="string" label="30000">
           <level>0</level>
           <default></default>

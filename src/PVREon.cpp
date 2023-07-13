@@ -86,10 +86,9 @@ std::string aes_encrypt_cbc(const std::string &iv_str, const std::string &key, c
 
     //Proper Length of plaintext
     int dlenu = dlen;
-    if (dlen % block_size) {
-        dlenu += block_size - (dlen % block_size);
-        kodi::Log(ADDON_LOG_DEBUG, "The original length of the plaintext is = %d and the length of the padded plaintext is = %d", dlen, dlenu);
-    }
+
+    dlenu += block_size - (dlen % block_size);
+    kodi::Log(ADDON_LOG_DEBUG, "The original length of the plaintext is = %d and the length of the padded plaintext is = %d", dlen, dlenu);
 
     // Make the uint8_t arrays
     uint8_t hexarray[dlenu];
@@ -126,6 +125,39 @@ std::string aes_encrypt_cbc(const std::string &iv_str, const std::string &key, c
     std::string output = convert.str();
 
     return output;
+}
+
+bool CPVREon::Parametrize(const int id) {
+  switch (id) {
+    case 1:
+      kodi::Log(ADDON_LOG_DEBUG,"Parametrizing for Android TV");
+      m_parameters.api_prefix = API_PREFIX_ATV;
+      m_parameters.api_selector = API_SELECTOR_ATV;
+      m_parameters.device_type = DEVICE_TYPE_ATV;
+      m_parameters.device_name = DEVICE_NAME_ATV;
+      m_parameters.device_model = DEVICE_MODEL_ATV;
+      m_parameters.device_platform = DEVICE_PLATFORM_ATV;
+      m_parameters.device_mac = DEVICE_MAC_ATV;
+      m_parameters.client_sw_version = CLIENT_SW_VERSION_ATV;
+      m_parameters.client_sw_build = CLIENT_SW_BUILD_ATV;
+      m_parameters.system_sw = SYSTEM_SW_ATV;
+      m_parameters.system_version = SYSTEM_VERSION_ATV;
+      break;
+    default:
+      kodi::Log(ADDON_LOG_DEBUG,"Parametrizing for Web");
+      m_parameters.api_prefix = API_PREFIX_WEB;
+      m_parameters.api_selector = API_SELECTOR_WEB;
+      m_parameters.device_type = DEVICE_TYPE_WEB;
+      m_parameters.device_name = DEVICE_NAME_WEB;
+      m_parameters.device_model = DEVICE_MODEL_WEB;
+      m_parameters.device_platform = DEVICE_PLATFORM_WEB;
+      m_parameters.device_mac = DEVICE_MAC_WEB;
+      m_parameters.client_sw_version = CLIENT_SW_VERSION_WEB;
+      m_parameters.client_sw_build = CLIENT_SW_BUILD_WEB;
+      m_parameters.system_sw = SYSTEM_SW_WEB;
+      m_parameters.system_version = SYSTEM_VERSION_WEB;
+  }
+  return true;
 }
 
 int CPVREon::getBitrate(const bool isRadio, const int id) {
@@ -247,7 +279,7 @@ bool CPVREon::GetCDNInfo()
 
     const rapidjson::Value& baseApi = cdnItem["domains"]["baseApi"];
 
-    cdn.baseApi = Utils::JsonStringOrEmpty(baseApi, "be");
+    cdn.baseApi = Utils::JsonStringOrEmpty(baseApi, m_parameters.api_selector.c_str());
     m_cdns.emplace_back(cdn);
   }
 
@@ -297,12 +329,28 @@ bool CPVREon::GetDeviceFromSerial()
   std::string jsonString;
   int statusCode = 0;
 
-  std::string postData = "{\"deviceName\":\"\",\"deviceType\":\"" + DEVICE_TYPE +
-                          "\",\"modelName\":\"" + DEVICE_MODEL +
-                          "\",\"platform\":\"" + DEVICE_PLATFORM +
-                          "\",\"serial\":\"" + m_device_serial +
-                          "\",\"clientSwVersion\":\"\",\"systemSwVersion\":{\"name\":\"" + SYSTEM_SW +
-                          "\",\"version\":\"" + SYSTEM_VERSION + "\"}}";
+  std::string postData;
+
+  if (m_settings->GetPlatform() == 1) {
+    postData = "{\"deviceName\":\"" + m_parameters.device_name +
+                  "\",\"deviceType\":\"" + m_parameters.device_type +
+                  "\",\"modelName\":\"" + m_parameters.device_model +
+                  "\",\"platform\":\"" + m_parameters.device_platform +
+                  "\",\"serial\":\"" + m_device_serial +
+                  "\",\"clientSwVersion\":\"" + m_parameters.client_sw_version +
+                  "\",\"clientSwBuild\":\"" + m_parameters.client_sw_build +
+                  "\",\"systemSwVersion\":{\"name\":\"" + m_parameters.system_sw +
+                  "\",\"version\":\"" + m_parameters.system_version +
+                  "\"},\"fcmToken\":\"\"}";
+        //TODO: implement parameter fcmToken...
+  } else {
+    postData = "{\"deviceName\":\"\",\"deviceType\":\"" + m_parameters.device_type +
+                  "\",\"modelName\":\"" + m_parameters.device_model +
+                  "\",\"platform\":\"" + m_parameters.device_platform +
+                  "\",\"serial\":\"" + m_device_serial +
+                  "\",\"clientSwVersion\":\"\",\"systemSwVersion\":{\"name\":\"" + m_parameters.system_sw +
+                  "\",\"version\":\"" + m_parameters.system_version + "\"}}";
+  }
 
   jsonString = m_httpClient->HttpPost(m_api + "v1/devices", postData, statusCode);
 
@@ -526,17 +574,19 @@ CPVREon::CPVREon() :
   m_settings->Load();
   m_httpClient = new HttpClient(m_settings);
 
+  Parametrize(m_settings->GetPlatform());
+
   srand(time(nullptr));
 
   if (GetCDNInfo()) {
     std::string cdn_identifier = GetBrandIdentifier();
     kodi::Log(ADDON_LOG_DEBUG, "CDN Identifier: %s", cdn_identifier.c_str());
     std::string baseApi = GetBaseApi(cdn_identifier);
-    m_api = "https://api-web." + baseApi + "/";
-    m_images_api = "https://images-web." + baseApi + "/";
+    m_api = "https://api-" + m_parameters.api_prefix + "." + baseApi + "/";
+    m_images_api = "https://images-" + m_parameters.api_prefix + "." + baseApi + "/";
   } else {
-    m_api = "https://api-web." + GLOBAL_URL;
-    m_images_api = "https://images-web." + GLOBAL_URL;
+    m_api = "https://api-" + m_parameters.api_prefix + "." + GLOBAL_URL;
+    m_images_api = "https://images-" + m_parameters.api_prefix + "." + GLOBAL_URL;
   }
   m_httpClient->SetApi(m_api);
   kodi::Log(ADDON_LOG_DEBUG, "API set to: %s", m_api.c_str());
@@ -1015,6 +1065,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
     unsigned int current_id = 0;
     for (unsigned int i = 0; i < channel.publishingPoints[0].profileIds.size(); i++) {
         current_bitrate = getBitrate(channel.bRadio, channel.publishingPoints[0].profileIds[i]);
+        kodi::Log(ADDON_LOG_DEBUG, "Bitrate is: %u for profile id: %u", current_bitrate, channel.publishingPoints[0].profileIds[i]);
         if (current_bitrate > rndbitrate) {
           current_id = channel.publishingPoints[0].profileIds[i];
           rndbitrate = current_bitrate;
@@ -1033,20 +1084,45 @@ PVR_ERROR CPVREon::GetStreamProperties(
 
     GetServer(isLive, currentServer);
 
-    std::string plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
-                            "stream=" + streaming_profile + ";" + "sp=" + m_service_provider + ";" +
-                            "u=" + m_settings->GetEonStreamUser() + ";" +
-                            "ss=" + m_settings->GetEonStreamKey() + ";" +
-                            "minvbr=100;adaptive=true;player=" + PLAYER + ";" +
-                            "sig=" + channel.sig + ";" +
-                            "session=" + m_session_id + ";" +
-                            "m=" + currentServer.ip + ";" +
-                            "device=" + m_settings->GetEonDeviceNumber() + ";" +
-                            "ctime=" + GetTime() + ";";
-    if (!isLive) {
-      plain_aes = plain_aes + "t=" + std::to_string(starttime) + "000;";
+    std::string plain_aes;
+
+    if (m_settings->GetPlatform() == 1) {
+      plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
+                  "stream=" + streaming_profile + ";" +
+                  "sp=" + m_service_provider + ";" +
+                  "u=" + m_settings->GetEonStreamUser() + ";" +
+                  "m=" + currentServer.ip + ";" +
+                  "device=" + m_settings->GetEonDeviceNumber() + ";" +
+                  "ctime=" + GetTime() + ";" +
+//                  "lang=eng;minvbr=100;adaptive=true;player=" + PLAYER + ";" +
+                  "lang=eng;player=" + PLAYER + ";" +
+                  "aa=" + (channel.aaEnabled ? "true" : "false") + ";" +
+                  "conn=" + CONN_TYPE_ETHERNET + ";" +
+                  "minvbr=100;" +
+//                  "sig=" + channel.sig + ";" +
+                  "ss=" + m_settings->GetEonStreamKey() + ";" +
+                  "session=" + m_session_id + ";" +
+                  "maxvbr=" + std::to_string(rndbitrate);
+                  if (!isLive) {
+                    plain_aes = plain_aes + ";t=" + std::to_string(starttime) + "000;";
+                  }
+    } else {
+      plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
+                  "stream=" + streaming_profile + ";" + "sp=" + m_service_provider + ";" +
+                  "u=" + m_settings->GetEonStreamUser() + ";" +
+                  "ss=" + m_settings->GetEonStreamKey() + ";" +
+                  "minvbr=100;adaptive=true;player=" + PLAYER + ";" +
+                  "sig=" + channel.sig + ";" +
+                  "session=" + m_session_id + ";" +
+                  "m=" + currentServer.ip + ";" +
+                  "device=" + m_settings->GetEonDeviceNumber() + ";" +
+                  "ctime=" + GetTime() + ";" +
+                  "conn=" + CONN_TYPE_BROWSER + ";";
+                  if (!isLive) {
+                    plain_aes = plain_aes + "t=" + std::to_string(starttime) + "000;";
+                  }
+                  plain_aes = plain_aes + "aa=" + (channel.aaEnabled ? "true" : "false");
     }
-    plain_aes = plain_aes + "conn=BROWSER;aa=" + (channel.aaEnabled ? "true" : "false");
     kodi::Log(ADDON_LOG_DEBUG, "Plain AES -> %s", plain_aes.c_str());
 
     std::string key = base64_decode(urlsafedecode(m_settings->GetEonStreamKey()));
@@ -1067,12 +1143,17 @@ PVR_ERROR CPVREon::GetStreamProperties(
 
     std::string enc_url = "https://" + currentServer.hostname +
                           "/stream?i=" + urlsafeencode(base64_encode(iv_str.c_str(), iv_str.length())) +
-                          "&a=" + urlsafeencode(base64_encode(enc_str.c_str(), enc_str.length())) +
-                          "&sp=" + m_service_provider +
+                          "&a=" + urlsafeencode(base64_encode(enc_str.c_str(), enc_str.length()));
+    if (m_settings->GetPlatform() == 1) {
+      enc_url = enc_url + "&lang=eng";
+    }
+    enc_url = enc_url +   "&sp=" + m_service_provider +
                           "&u=" + m_settings->GetEonStreamUser() +
                           "&player=" + PLAYER +
-                          "&session=" + m_session_id +
-                          "&sig=" + channel.sig;
+                          "&session=" + m_session_id;
+    if (m_settings->GetPlatform() != 1) {
+      enc_url = enc_url + "&sig=" + channel.sig;
+    }
 
     kodi::Log(ADDON_LOG_DEBUG, "Encrypted Stream URL -> %s", enc_url.c_str());
 
@@ -1293,11 +1374,15 @@ bool CPVREon::GetServer(bool isLive, EonServer& myServer)
   } else {
     servers = m_timeshift_servers;
   }
+  int target_server = 2;
+  if (m_settings->GetPlatform() == 1) {
+    target_server = 3;
+  }
   int count = 0;
   for (const auto& thisServer : servers)
   {
       count++;
-      if (count == 2) {
+      if (count == target_server) {
         myServer.id = thisServer.id;
         myServer.ip = thisServer.ip;
         myServer.hostname = thisServer.hostname;
