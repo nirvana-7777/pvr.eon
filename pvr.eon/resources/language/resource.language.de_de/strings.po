@@ -181,8 +181,8 @@ msgid "Nova"
 msgstr "Nova"
 
 msgctxt "#30041"
-msgid "Plattform"
-msgstr ""
+msgid "Platform"
+msgstr "Plattform"
 
 msgctxt "#30042"
 msgid "Web"
@@ -194,4 +194,20 @@ msgstr ""
 
 msgctxt "#30044"
 msgid "WebOS"
+msgstr ""
+
+msgctxt "#30045"
+msgid "Use short channel names"
+msgstr "Kurze Sendernamen benutzen"
+
+msgctxt "#30046"
+msgid "Please enter OTP to register device"
+msgstr "Bitte OTP eingeben um das Gerät zu registrieren"
+
+msgctxt "#30047"
+msgid "Im Service Provider Self Service Portal Geräte auswählen und den 6-stelligen Code eingeben. Mit OK beenden. Sie haben noch "
+msgstr ""
+
+msgctxt "#30048"
+msgid "min Zeit."
 msgstr ""

@@ -171,6 +171,11 @@
           <default>true</default>
           <control type="toggle" />
         </setting>
+        <setting id="shortnames" type="boolean" label="30045">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle" />
+        </setting>
         <setting id="startnum" type="integer" label="30033">
           <level>0</level>
           <default>1</default>

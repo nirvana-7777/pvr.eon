@@ -108,6 +108,13 @@ bool CSettings::Load()
     return false;
   }
 
+  if (!kodi::addon::CheckSettingBoolean("shortnames", m_shortnames))
+  {
+    /* If setting is unknown fallback to defaults */
+    kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'shortnames' setting");
+    return false;
+  }
+
   if (!kodi::addon::CheckSettingString("genericaccesstoken", m_Generic_AccessToken))
   {
     /* If setting is unknown fallback to defaults */

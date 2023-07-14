@@ -39,6 +39,7 @@ public:
   const bool IsTVenabled() const { return m_enabletv; }
   const bool IsRadioenabled() const { return m_enableradio; }
   const bool IsGroupsenabled() const  { return m_enablegroups; }
+  const bool UseShortNames() const  { return m_shortnames; }
 
 private:
   int m_eonServiceProvider;
@@ -62,4 +63,5 @@ private:
   bool m_enabletv;
   bool m_enableradio;
   bool m_enablegroups;
+  bool m_shortnames;
 };

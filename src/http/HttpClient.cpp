@@ -8,6 +8,7 @@
 //#include <botan/base64.h>
 #include "../SHA256.h"
 #include "../Base64.h"
+#include <kodi/gui/dialogs/OK.h>
 
 void HttpClient::SetApi(const std::string& api)
 {
@@ -125,13 +126,7 @@ bool HttpClient::RefreshToken()
   if (!refresh_token.empty()) {
     url += "refresh_token&refresh_token=" + refresh_token;
   }
-  else if ((!m_settings->GetEonUsername().empty()) && (!m_settings->GetEonPassword().empty()) && (!m_settings->GetEonDeviceNumber().empty())) {
-/*
-    auto hash = Botan::HashFunction::create("SHA-256");
-    hash->update(m_settings->GetEonUsername());
-    std::string user_hash1 = Botan::hex_encode(hash->final());
-    kodi::Log(ADDON_LOG_DEBUG, "SHA256 %s", user_hash1.c_str());
-*/
+  else if ((!m_settings->GetEonUsername().empty()) && (!m_settings->GetEonPassword().empty()) && (!m_settings->GetEonDeviceNumber().empty()) && (m_settings->GetPlatform() != 1)) {
     SHA256 sha;
     sha.update(m_settings->GetEonUsername());
     uint8_t * digest = sha.digest();
@@ -157,17 +152,36 @@ bool HttpClient::RefreshToken()
     url += "password";
   }
   else {
-    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh token");
-    return false;
+    //Try to login with OTP
+    std::string generic_access_token = m_settings->GetGenericAccessToken();
+    if ((m_settings->GetPlatform() == 1) && (!generic_access_token.empty()) && (!m_settings->GetEonDeviceNumber().empty())) {
+      Curl curl_otp;
+      int statusCode_otp;
+      std::string url_otp = m_api + "v1/otp?deviceNumber=" + m_settings->GetEonDeviceNumber();
+      curl_otp.AddHeader("User-Agent", EON_USER_AGENT);
+      curl_otp.AddHeader("Authorization", "bearer " + generic_access_token);
+      std::string otp_response = HttpRequestToCurl(curl_otp, "GET", url_otp, "", statusCode_otp);
+      rapidjson::Document doc;
+      doc.Parse(otp_response.c_str());
+      if (doc.GetParseError())
+      {
+        kodi::Log(ADDON_LOG_ERROR, "Failed to get OTP");
+        return false;
+      }
+      std::string otp = Utils::JsonStringOrEmpty(doc, "otp");
+      int expires = (int) Utils::JsonIntOrZero(doc, "expiresInSeconds") / 60;
+      std::string text = "\n" + otp + "\n\n" + kodi::addon::GetLocalizedString(30047) + std::to_string(expires) + kodi::addon::GetLocalizedString(30048) + "\n";
+      kodi::gui::dialogs::OK::ShowAndGetInput(kodi::addon::GetLocalizedString(30046), text);
+      url += "otp&otp=" + otp + "&device_number=" + m_settings->GetEonDeviceNumber();
+    } else {
+      kodi::Log(ADDON_LOG_ERROR, "Failed to refresh token");
+      return false;
+    }
   }
 
   int statusCode;
 
-
   std::string basic_token = client_id + ":" + client_secret;
-  // Copy input data to a buffer that will be encrypted
-//  Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
-//  curl_auth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
   curl_auth.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
 
   std::string content_auth = HttpRequestToCurl(curl_auth, "POST", url, postData, statusCode);
@@ -301,9 +315,6 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
       curl.AddHeader("accesstoken", access_token);
     }
     std::string basic_token = SS_USER + ":" + SS_SECRET;
-    // Copy input data to a buffer that will be encrypted
-//    Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
-//    curl.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
     curl.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
   } else {
     if (url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos) {
@@ -315,9 +326,6 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
       curl.AddHeader("Authorization", "bearer " + access_token);
     } else {
       std::string basic_token = client_id + ":" + client_secret;
-      // Copy input data to a buffer that will be encrypted
-//      Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
-//      curl.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
       curl.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
     }
   }
@@ -333,18 +341,15 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
   if (statusCode == 401) {
     Curl curl_reauth;
     size_t found = url.find(SS_PORTAL);
+    bool refresh_successful = true;
     if (found != std::string::npos) {
       if (RefreshSSToken()) {
         access_token = m_settings->GetSSAccessToken();
         curl_reauth.AddHeader("accesstoken", access_token);
         std::string basic_token = SS_USER + ":" + SS_SECRET;
-        // Copy input data to a buffer that will be encrypted
-//        Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
-//        curl_reauth.AddHeader("Authorization", "Basic " + Botan::base64_encode(bt));
         curl_reauth.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
       }
     } else {
-      bool refresh_successful;
       if (url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos) {
         refresh_successful = RefreshGenericToken();
         access_token = m_settings->GetGenericAccessToken();
@@ -352,11 +357,11 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
         refresh_successful = RefreshToken();
         access_token = m_settings->GetEonAccessToken();
       }
-      if (refresh_successful) {
-        curl_reauth.AddHeader("Authorization", "bearer " + access_token);
-      }
+      curl_reauth.AddHeader("Authorization", "bearer " + access_token);
     }
-    content = HttpRequestToCurl(curl_reauth, action, url, postData, statusCode);
+    if (refresh_successful) {
+      content = HttpRequestToCurl(curl_reauth, action, url, postData, statusCode);
+    }
   }
 
   if (statusCode >= 400 || statusCode < 200) {

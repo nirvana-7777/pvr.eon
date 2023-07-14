@@ -183,3 +183,19 @@ msgstr ""
 msgctxt "#30044"
 msgid "WebOS"
 msgstr ""
+
+msgctxt "#30045"
+msgid "Use short channel names"
+msgstr ""
+
+msgctxt "#30046"
+msgid "Please enter OTP to register device"
+msgstr ""
+
+msgctxt "#30047"
+msgid "Please go to your service provider's self service portal, click the devices tab and enter the above 6-digit code. Click OK when finished. You have "
+msgstr ""
+
+msgctxt "#30048"
+msgid "min left."
+msgstr ""

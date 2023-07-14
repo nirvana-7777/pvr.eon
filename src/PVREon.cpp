@@ -620,30 +620,35 @@ CPVREon::CPVREon() :
     }
   }
 
+  bool allgood = true;
+
   m_subscriber_id = m_settings->GetEonSubscriberID();
   if (m_subscriber_id.empty()) {
     if (GetHouseholds()) {
       m_settings->SetSetting("subscriberid", m_subscriber_id);
+    } else {
+      allgood = false;
     }
   }
 
   if (m_service_provider.empty() || m_support_web.empty()) {
-    GetServiceProvider();
+    allgood = GetServiceProvider();
   }
 
-  GetRenderingProfiles();
-  GetServers();
-
-//  }
-  if (m_settings->IsTVenabled()) {
-    GetCategories(false);
-    LoadChannels(false);
+  if (allgood) {
+    allgood = GetRenderingProfiles();
   }
-  if (m_settings->IsRadioenabled()) {
-    GetCategories(true);
-    LoadChannels(true);
+  if (allgood) {
+    allgood = GetServers();
   }
-
+  if (m_settings->IsTVenabled() && (allgood)) {
+    allgood = GetCategories(false);
+    allgood = LoadChannels(false);
+  }
+  if (m_settings->IsRadioenabled() && (allgood)) {
+    allgood = GetCategories(true);
+    allgood = LoadChannels(true);
+  }
 }
 
 CPVREon::~CPVREon()
@@ -691,7 +696,12 @@ bool CPVREon::LoadChannels(const bool isRadio)
   {
     const rapidjson::Value& channelItem = (*itr1);
 
-    std::string channame = Utils::JsonStringOrEmpty(channelItem, "name");
+    std::string channame;
+    if (m_settings->UseShortNames()) {
+      channame = Utils::JsonStringOrEmpty(channelItem, "shortName");
+    } else {
+      channame = Utils::JsonStringOrEmpty(channelItem, "name");
+    }
 
     EonChannel eon_channel;
 
