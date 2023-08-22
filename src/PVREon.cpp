@@ -1095,6 +1095,8 @@ PVR_ERROR CPVREon::GetStreamProperties(
     GetServer(isLive, currentServer);
 
     std::string plain_aes;
+    std::string lower_sp = m_service_provider;
+    std::transform(lower_sp.begin(), lower_sp.end(), lower_sp.begin(), ::tolower);
 
     if (m_settings->GetPlatform() == 1) {
       plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
@@ -1157,7 +1159,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
     if (m_settings->GetPlatform() == 1) {
       enc_url = enc_url + "&lang=eng";
     }
-    enc_url = enc_url +   "&sp=" + m_service_provider +
+    enc_url = enc_url +   "&sp=" + lower_sp +
                           "&u=" + m_settings->GetEonStreamUser() +
                           "&player=" + PLAYER +
                           "&session=" + m_session_id;
@@ -1213,7 +1215,7 @@ PVR_ERROR CPVREon::GetChannelGroups(bool bRadio, kodi::addon::PVRChannelGroupsRe
       kodiGroup.SetGroupName(it->name);
 
       results.Add(kodiGroup);
-      kodi::Log(ADDON_LOG_DEBUG, "Group added: %s at postion %u", it->name.c_str(), it->order);
+      kodi::Log(ADDON_LOG_DEBUG, "Group added: %s at position %u", it->name.c_str(), it->order);
     }
   }
 
@@ -1400,11 +1402,6 @@ bool CPVREon::GetServer(bool isLive, EonServer& myServer)
       }
   }
   return false;
-}
-
-std::string CPVREon::GetRecordingURL(const kodi::addon::PVRRecording& recording)
-{
-  return "";
 }
 
 ADDONCREATOR(CPVREon)
