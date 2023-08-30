@@ -113,6 +113,7 @@ struct EonParameters
   std::string client_sw_build;
   std::string system_sw;
   std::string system_version;
+  std::string user_agent;
 };
 
 class ATTR_DLL_LOCAL CPVREon : public kodi::addon::CAddonBase,

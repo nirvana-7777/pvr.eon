@@ -142,6 +142,7 @@ bool CPVREon::Parametrize(const int id) {
       m_parameters.client_sw_build = CLIENT_SW_BUILD_ATV;
       m_parameters.system_sw = SYSTEM_SW_ATV;
       m_parameters.system_version = SYSTEM_VERSION_ATV;
+      m_parameters.user_agent = USER_AGENT_ATV;
       break;
     default:
       kodi::Log(ADDON_LOG_DEBUG,"Parametrizing for Web");
@@ -156,6 +157,7 @@ bool CPVREon::Parametrize(const int id) {
       m_parameters.client_sw_build = CLIENT_SW_BUILD_WEB;
       m_parameters.system_sw = SYSTEM_SW_WEB;
       m_parameters.system_version = SYSTEM_VERSION_WEB;
+      m_parameters.user_agent = USER_AGENT_WEB;
   }
   return true;
 }
@@ -777,7 +779,7 @@ bool CPVREon::LoadChannels(const bool isRadio)
     }
 
     if (!m_settings->HideUnsubscribed() || eon_channel.subscribed) {
-      kodi::Log(ADDON_LOG_DEBUG, "%i. Channel Name: %s ID: %i", lastnumber, channame.c_str(), ref_id);
+      kodi::Log(ADDON_LOG_DEBUG, "%i. Channel Name: %s ID: %i Sig: %s", lastnumber, channame.c_str(), ref_id, eon_channel.sig.c_str());
       m_channels.emplace_back(eon_channel);
     }
   }
@@ -846,6 +848,7 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
 //  properties.emplace_back("inputstream.adaptive.original_audio_language", "bs");
 //  properties.emplace_back("inputstream.adaptive.stream_selection_type", "adaptive");
   properties.emplace_back("inputstream.adaptive.stream_selection_type", "manual-osd");
+  properties.emplace_back("inputstream.adaptive.manifest_headers", "User-Agent=" + m_parameters.user_agent);
 
 //  properties.emplace_back("inputstream.adaptive.license_type", "com.widevine.alpha");
 //  properties.emplace_back("inputstream.adaptive.license_key",
@@ -1095,8 +1098,6 @@ PVR_ERROR CPVREon::GetStreamProperties(
     GetServer(isLive, currentServer);
 
     std::string plain_aes;
-    std::string lower_sp = m_service_provider;
-    std::transform(lower_sp.begin(), lower_sp.end(), lower_sp.begin(), ::tolower);
 
     if (m_settings->GetPlatform() == 1) {
       plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
@@ -1159,7 +1160,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
     if (m_settings->GetPlatform() == 1) {
       enc_url = enc_url + "&lang=eng";
     }
-    enc_url = enc_url +   "&sp=" + lower_sp +
+    enc_url = enc_url +   "&sp=" + m_service_provider +
                           "&u=" + m_settings->GetEonStreamUser() +
                           "&player=" + PLAYER +
                           "&session=" + m_session_id;
