@@ -929,8 +929,8 @@ PVR_ERROR CPVREon::GetEPGForChannel(int channelUid,
 
     std::string url = m_api + "v1/events/epg";
     std::string params = "?cid=" + std::to_string(channel.iUniqueId) +
-                         "&fromTime=" + std::to_string(start*1000) +
-                         "&toTime=" + std::to_string(end*1000);
+                         "&fromTime=" + std::to_string(start) + "000" +
+                         "&toTime=" + std::to_string(end) + "000";
 
     jsonEpg = m_httpClient->HttpGet(url + params, statusCode);
 
