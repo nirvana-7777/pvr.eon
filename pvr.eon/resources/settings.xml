@@ -186,5 +186,20 @@
         </setting>
       </group>
     </category>
+    <category id="streaming" label="30049">
+      <group id="3" label="30050">
+        <setting id="inputstream" type="integer" label="30051">
+          <level>0</level>
+          <default>0</default>
+          <constraints>
+            <options>
+              <option label="30052">0</option> <!-- inputstream.adaptive -->
+              <option label="30053">1</option> <!-- inputstream.ffmpegdirect -->
+            </options>
+          </constraints>
+          <control type="list" format="integer" />
+        </setting>
+      </group>
+    </category>
   </section>
 </settings>

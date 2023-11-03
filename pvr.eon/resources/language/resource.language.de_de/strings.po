@@ -211,3 +211,23 @@ msgstr ""
 msgctxt "#30048"
 msgid "min Zeit."
 msgstr ""
+
+msgctxt "#30049"
+msgid "Streaming"
+msgstr "Streaming"
+
+msgctxt "#30050"
+msgid "Inputstream"
+msgstr "Inputstream"
+
+msgctxt "#30051"
+msgid "Select Inputstream"
+msgstr "Inputstream auswählen"
+
+msgctxt "#30052"
+msgid "inputstream.adaptive"
+msgstr "inputstream.adaptive"
+
+msgctxt "#30053"
+msgid "inputstream.ffmpegdirect"
+msgstr "inputstream.ffmpegdirect"

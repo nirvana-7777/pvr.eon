@@ -164,6 +164,13 @@ bool CSettings::Load()
     return false;
   }
 
+  if (!kodi::addon::CheckSettingInt("inputstream", m_eonInputstream))
+  {
+    /* If setting is unknown fallback to defaults */
+    kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'inputstream' setting");
+    return false;
+  }
+
   return true;
 }
 

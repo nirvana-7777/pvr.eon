@@ -833,30 +833,41 @@ bool CPVREon::HandleSession(bool start, int cid, int epg_id)
 
 void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,
                                     const std::string& url,
-                                    bool realtime, bool playTimeshiftBuffer,
-                                    const std::string& license)
+                                    const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive,
+                                    const int& starttime, const int& endtime)
 {
   kodi::Log(ADDON_LOG_DEBUG, "[PLAY STREAM] url: %s", url.c_str());
 
   properties.emplace_back(PVR_STREAM_PROPERTY_STREAMURL, url);
-  properties.emplace_back(PVR_STREAM_PROPERTY_INPUTSTREAM, "inputstream.adaptive");
   properties.emplace_back(PVR_STREAM_PROPERTY_ISREALTIMESTREAM, realtime ? "true" : "false");
-
-  kodi::Log(ADDON_LOG_DEBUG, "[PLAY STREAM] hls");
-  properties.emplace_back("inputstream.adaptive.manifest_type", "hls");
   properties.emplace_back(PVR_STREAM_PROPERTY_MIMETYPE, "application/x-mpegURL");
-//  properties.emplace_back("inputstream.adaptive.original_audio_language", "bs");
-//  properties.emplace_back("inputstream.adaptive.stream_selection_type", "adaptive");
-  properties.emplace_back("inputstream.adaptive.stream_selection_type", "manual-osd");
-  properties.emplace_back("inputstream.adaptive.manifest_headers", "User-Agent=" + m_parameters.user_agent);
 
-//  properties.emplace_back("inputstream.adaptive.license_type", "com.widevine.alpha");
-//  properties.emplace_back("inputstream.adaptive.license_key",
-//                          "https://lic.drmtoday.com/license-proxy-widevine/cenc/"
-//                          "|Content-Type=text%2Fxml&dt-custom-data=" +
-//                              license + "|R{SSM}|JBlicense");
+  int inputstream = m_settings->GetInputstream();
 
-  properties.emplace_back("inputstream.adaptive.manifest_update_parameter", "full");
+  if (inputstream == INPUTSTREAM_ADAPTIVE)
+  {
+    properties.emplace_back(PVR_STREAM_PROPERTY_INPUTSTREAM, "inputstream.adaptive");
+    properties.emplace_back("inputstream.adaptive.manifest_type", "hls");
+    //  properties.emplace_back("inputstream.adaptive.original_audio_language", "bs");
+    //  properties.emplace_back("inputstream.adaptive.stream_selection_type", "adaptive");
+    properties.emplace_back("inputstream.adaptive.stream_selection_type", "manual-osd");
+    properties.emplace_back("inputstream.adaptive.manifest_headers", "User-Agent=" + m_parameters.user_agent);
+    properties.emplace_back("inputstream.adaptive.manifest_update_parameter", "full");
+  } else if (inputstream == INPUTSTREAM_FFMPEGDIRECT)
+  {
+    properties.emplace_back(PVR_STREAM_PROPERTY_INPUTSTREAM, "inputstream.ffmpegdirect");
+    properties.emplace_back("inputstream.ffmpegdirect.manifest_type", "hls");
+    properties.emplace_back("inputstream.ffmpegdirect.is_realtime_stream", "true");
+    properties.emplace_back("inputstream.ffmpegdirect.stream_mode", isLive ? "timeshift" : "catchup");
+    if (!isLive) {
+      properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_start_time", std::to_string(starttime));
+      properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_end_time", std::to_string(endtime));
+      properties.emplace_back("inputstream.ffmpegdirect.programme_start_time", std::to_string(starttime));
+      properties.emplace_back("inputstream.ffmpegdirect.programme_end_time", std::to_string(endtime));            
+    }
+  } else {
+    kodi::Log(ADDON_LOG_DEBUG, "Unknown inputstream detected");
+  }
 }
 
 
@@ -1012,7 +1023,7 @@ PVR_ERROR CPVREon::GetEPGTagStreamProperties(
   {
     if (channel.iUniqueId == tag.GetUniqueChannelId())
     {
-      return GetStreamProperties(channel, properties, tag.GetStartTime(), false);
+      return GetStreamProperties(channel, properties, tag.GetStartTime(), tag.GetEndTime(), false);
     }
   }
   return PVR_ERROR_NO_ERROR;
@@ -1068,7 +1079,7 @@ PVR_ERROR CPVREon::GetChannels(bool bRadio, kodi::addon::PVRChannelsResultSet& r
 }
 
 PVR_ERROR CPVREon::GetStreamProperties(
-    const EonChannel& channel, std::vector<kodi::addon::PVRStreamProperty>& properties, int starttime, bool isLive)
+    const EonChannel& channel, std::vector<kodi::addon::PVRStreamProperty>& properties, const int& starttime, const int& endtime, const bool& isLive)
 {
     kodi::Log(ADDON_LOG_DEBUG, "function call: [%s]", __FUNCTION__);
     std::string streaming_profile = "hp7000";
@@ -1170,7 +1181,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
 
     kodi::Log(ADDON_LOG_DEBUG, "Encrypted Stream URL -> %s", enc_url.c_str());
 
-    SetStreamProperties(properties, enc_url, true, false, "");
+    SetStreamProperties(properties, enc_url, true, false, isLive, starttime, endtime);
 
   return PVR_ERROR_NO_ERROR;
 }
@@ -1182,7 +1193,7 @@ PVR_ERROR CPVREon::GetChannelStreamProperties(
   EonChannel addonChannel;
   if (GetChannel(channel, addonChannel)) {
     if (addonChannel.subscribed) {
-        return GetStreamProperties(addonChannel, properties, 0, true);
+        return GetStreamProperties(addonChannel, properties, 0, 0, true);
     }
     kodi::Log(ADDON_LOG_DEBUG, "Channel not subscribed");
     return PVR_ERROR_SERVER_ERROR;

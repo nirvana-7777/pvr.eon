@@ -203,3 +203,23 @@ msgstr ""
 msgctxt "#30048"
 msgid "min left."
 msgstr ""
+
+msgctxt "#30049"
+msgid "Streaming"
+msgstr ""
+
+msgctxt "#30050"
+msgid "Inputstream"
+msgstr ""
+
+msgctxt "#30051"
+msgid "Select Inputstream"
+msgstr ""
+
+msgctxt "#30052"
+msgid "inputstream.adaptive"
+msgstr ""
+
+msgctxt "#30053"
+msgid "inputstream.ffmpegdirect"
+msgstr ""

@@ -14,3 +14,5 @@ v20.7.1
   - Adapt user agent header for platforms when streaming
 v20.7.2
   - Fix EPG date
+v20.7.3
+  - Optionally use inputstream.ffmpegdirect

@@ -14,6 +14,9 @@
 #include "http/HttpClient.h"
 #include "rapidjson/document.h"
 
+static const int INPUTSTREAM_ADAPTIVE = 0;
+static const int INPUTSTREAM_FFMPEGDIRECT = 1;
+
 struct EonChannelCategory
 {
   int id;
@@ -183,12 +186,12 @@ private:
 
   void SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,
                            const std::string& url,
-                           bool realtime, bool playTimeshiftBuffer,
-                           const std::string& license);
+                           const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive,
+                           const int& starttime, const int& endtime);
 
   PVR_ERROR GetStreamProperties(
     const EonChannel& channel,
-    std::vector<kodi::addon::PVRStreamProperty>& properties, int starttime, bool isLive);
+    std::vector<kodi::addon::PVRStreamProperty>& properties, const int& starttime, const int& endtime, const bool& isLive);
 
   bool Parametrize(const int id);
 
@@ -247,17 +250,4 @@ private:
   bool GetCategories(const bool isRadio);
   int GetDefaultNumber(const bool isRadio, int id);
   bool HandleSession(bool start, int cid, int epg_id);
-/*
-  bool HrtiLogin();
-  bool GetIpAddress();
-  bool GrantAccess();
-  bool RegisterDevice();
-  bool LoadChannels();
-  bool AuthorizeSession(std::string ref_id, std::string drm_id);
-  std::string GetLicense(std::string drm_id, std::string user_id);
-*/
-//  std::string ltrim(const std::string &s);
-//  std::string rtrim(const std::string &s);
-//  std::string trim(const std::string &s);
-//  std::string urlencode(const std::string &s);
 };
