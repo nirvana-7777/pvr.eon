@@ -15,6 +15,11 @@ void HttpClient::SetApi(const std::string& api)
   m_api = api;
 }
 
+void HttpClient::SetSupportApi(const std::string& supportApi)
+{
+  m_supportApi = supportApi;
+}
+
 bool HttpClient::RefreshGenericToken()
 {
   Curl curl_auth;
@@ -57,7 +62,7 @@ bool HttpClient::RefreshSSToken()
 {
   Curl curl_auth;
 
-  std::string url = SS_PORTAL + "/gateway/SCAuthAPI/1.0/scauth/auth/authentication"; //TODO: Fix URL
+  std::string url = m_supportApi + "/gateway/SCAuthAPI/1.0/scauth/auth/authentication"; //TODO: Fix URL
   std::string refresh_token = m_settings->GetSSRefreshToken();
   std::string access_token = m_settings->GetSSAccessToken();
   std::string username = m_settings->GetEonUsername();
@@ -308,7 +313,7 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
 
   curl.AddHeader("User-Agent", EON_USER_AGENT);
 
-  size_t found = url.find(SS_PORTAL);
+  size_t found = url.find(m_supportApi);
   if (found != std::string::npos) {
     access_token = m_settings->GetSSAccessToken();
     if (!access_token.empty()) {
@@ -340,7 +345,7 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
 
   if (statusCode == 401) {
     Curl curl_reauth;
-    size_t found = url.find(SS_PORTAL);
+    size_t found = url.find(m_supportApi);
     bool refresh_successful = true;
     if (found != std::string::npos) {
       if (RefreshSSToken()) {

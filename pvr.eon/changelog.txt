@@ -9,7 +9,7 @@ v20.6.1
   - Switch from adaptive to manual-osd for inputstream
   - Fix not subscribed channels leading to crash
 v20.7.0
-  - Add Android TV platform (e.g. BigScreen/4K
+  - Add Android TV platform (e.g. BigScreen/4K)
 v20.7.1
   - Adapt user agent header for platforms when streaming
 v20.7.2

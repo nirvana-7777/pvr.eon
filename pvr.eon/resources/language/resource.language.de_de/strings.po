@@ -231,3 +231,15 @@ msgstr "inputstream.adaptive"
 msgctxt "#30053"
 msgid "inputstream.ffmpegdirect"
 msgstr "inputstream.ffmpegdirect"
+
+msgctxt "#30500"
+msgid "Inputstream error"
+msgstr "Inputstream Fehler"
+
+msgctxt "#30501"
+msgid "The %s addon is not installed."
+msgstr "Das %s Addon ist nicht installiert"
+
+msgctxt "#30502"
+msgid "The %s addon is not enabled."
+msgstr "Das %s Addon ist nicht aktiviert"

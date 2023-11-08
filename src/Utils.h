@@ -26,4 +26,5 @@ public:
   static double JsonDoubleOrZero(const rapidjson::Value& jsonValue, const char* fieldName);
   static bool JsonBoolOrFalse(const rapidjson::Value& jsonValue, const char* fieldName);
   static std::string CreateUUID();
+  static bool CheckInputstreamInstalledAndEnabled(const std::string& inputstreamName);
 };
