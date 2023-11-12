@@ -38,6 +38,7 @@ set(EON_HEADERS
 )
 
 addon_version(pvr.eon EON)
+add_definitions(-DEON_VERSION=${EON_VERSION})
 
 build_addon(pvr.eon EON DEPLIBS)
 

@@ -832,13 +832,13 @@ PVR_ERROR CPVREon::GetCapabilities(kodi::addon::PVRCapabilities& capabilities)
 
 PVR_ERROR CPVREon::GetBackendName(std::string& name)
 {
-  name = "eon pvr add-on";
+  name = "EON PVR";
   return PVR_ERROR_NO_ERROR;
 }
 
 PVR_ERROR CPVREon::GetBackendVersion(std::string& version)
 {
-  version = "0.1";
+  version = STR(EON_VERSION);
   return PVR_ERROR_NO_ERROR;
 }
 
@@ -850,13 +850,13 @@ PVR_ERROR CPVREon::GetConnectionString(std::string& connection)
 
 PVR_ERROR CPVREon::GetBackendHostname(std::string& hostname)
 {
-  hostname = "";
+  hostname = m_api;
   return PVR_ERROR_NO_ERROR;
 }
 
 PVR_ERROR CPVREon::GetDriveSpace(uint64_t& total, uint64_t& used)
 {
-  total = 1024 * 1024 * 1024;
+  total = 0;
   used = 0;
   return PVR_ERROR_NO_ERROR;
 }
@@ -899,15 +899,37 @@ PVR_ERROR CPVREon::GetEPGForChannel(int channelUid,
       const rapidjson::Value& epgItem = (*itr1);
 
       kodi::addon::PVREPGTag tag;
+      unsigned int epg_tag_flags = EPG_TAG_FLAG_UNDEFINED;
 
       tag.SetUniqueBroadcastId(Utils::JsonIntOrZero(epgItem,"id"));
       tag.SetUniqueChannelId(channelUid);
       tag.SetTitle(Utils::JsonStringOrEmpty(epgItem,"title"));
+      tag.SetOriginalTitle(Utils::JsonStringOrEmpty(epgItem,"originalTitle"));
       int64_t starttime = Utils::JsonInt64OrZero(epgItem,"startTime") / 1000;
       int64_t endtime = Utils::JsonInt64OrZero(epgItem,"endTime") / 1000;
       tag.SetStartTime((int)starttime);
       tag.SetEndTime((int)endtime);
       tag.SetPlot(Utils::JsonStringOrEmpty(epgItem,"shortDescription"));
+      int seasonNumber = Utils::JsonIntOrZero(epgItem,"seasonNumber");
+      if (seasonNumber != 0)
+        tag.SetSeriesNumber(seasonNumber);
+      int episodeNumber = Utils::JsonIntOrZero(epgItem,"episodeNumber");
+      if (episodeNumber != 0)
+      {
+        tag.SetEpisodeNumber(episodeNumber);
+        epg_tag_flags += EPG_TAG_FLAG_IS_SERIES;
+      }
+      int ageRating = 0;
+      try {
+        ageRating = std::stoi(Utils::JsonStringOrEmpty(epgItem,"ageRating"));
+      } catch (std::invalid_argument&e) {
+
+      }
+      if (ageRating != 0)
+        tag.SetParentalRating(ageRating);
+
+      if (Utils::JsonBoolOrFalse(epgItem, "liveBroadcast"))
+        epg_tag_flags += EPG_TAG_FLAG_IS_LIVE;
 
       const rapidjson::Value& images = epgItem["images"];
       for (rapidjson::Value::ConstValueIterator itr2 = images.Begin();
@@ -919,7 +941,15 @@ PVR_ERROR CPVREon::GetEPGForChannel(int channelUid,
           tag.SetIconPath(m_images_api + Utils::JsonStringOrEmpty(imageItem, "path"));
         }
       }
-      kodi::Log(ADDON_LOG_DEBUG, "%u adding EPG: ID: %u Title: %s Start: %u End: %u", channelUid, Utils::JsonIntOrZero(epgItem,"id"), Utils::JsonStringOrEmpty(epgItem,"title").c_str(),Utils::JsonIntOrZero(epgItem,"startTime")/1000,Utils::JsonIntOrZero(epgItem,"endTime")/1000);
+/*
+      const rapidjson::Value& categories = epgItem["categories"];
+      for (rapidjson::SizeType i = 0; i < categories.Size(); i++)
+      {
+        kodi::Log(ADDON_LOG_DEBUG, "Category: %u", categories[i].GetInt());
+      }
+*/
+//      kodi::Log(ADDON_LOG_DEBUG, "%u adding EPG: ID: %u Title: %s Start: %u End: %u", channelUid, Utils::JsonIntOrZero(epgItem,"id"), Utils::JsonStringOrEmpty(epgItem,"title").c_str(),Utils::JsonIntOrZero(epgItem,"startTime")/1000,Utils::JsonIntOrZero(epgItem,"endTime")/1000);
+      tag.SetFlags(epg_tag_flags);
       results.Add(tag);
     }
   }
@@ -1079,7 +1109,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
                   }
                   plain_aes = plain_aes + "aa=" + (channel.aaEnabled ? "true" : "false");
     }
-    kodi::Log(ADDON_LOG_DEBUG, "Plain AES -> %s", plain_aes.c_str());
+//    kodi::Log(ADDON_LOG_DEBUG, "Plain AES -> %s", plain_aes.c_str());
 
     std::string key = base64_decode(urlsafedecode(m_settings->GetEonStreamKey()));
 
@@ -1093,7 +1123,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
 
     kodi::Log(ADDON_LOG_DEBUG, "IV -> %s", string_to_hex(iv_str).c_str());
     kodi::Log(ADDON_LOG_DEBUG, "IV (base64) -> %s", urlsafeencode(base64_encode(iv_str.c_str(), iv_str.length())).c_str());
-    kodi::Log(ADDON_LOG_DEBUG, "Key -> %s", string_to_hex(key).c_str());
+//    kodi::Log(ADDON_LOG_DEBUG, "Key -> %s", string_to_hex(key).c_str());
     kodi::Log(ADDON_LOG_DEBUG, "Encrypted -> %s", string_to_hex(enc_str).c_str());
     kodi::Log(ADDON_LOG_DEBUG, "Encrypted (base64) -> %s", urlsafeencode(base64_encode(enc_str.c_str(), enc_str.length())).c_str());
 
@@ -1230,64 +1260,7 @@ PVR_ERROR CPVREon::GetTimers(kodi::addon::PVRTimersResultSet& results)
 {
   return PVR_ERROR_NO_ERROR;
 }
-/*
-PVR_ERROR CPVREon::CallEPGMenuHook(const kodi::addon::PVRMenuhook& menuhook,
-                                    const kodi::addon::PVREPGTag& item)
-{
-  kodi::Log(ADDON_LOG_DEBUG, "function call: [%s]", __FUNCTION__);
 
-
-  return CallMenuHook(menuhook);
-}
-
-PVR_ERROR CPVREon::CallChannelMenuHook(const kodi::addon::PVRMenuhook& menuhook,
-                                        const kodi::addon::PVRChannel& item)
-{
-  return CallMenuHook(menuhook);
-}
-
-PVR_ERROR CPVREon::CallTimerMenuHook(const kodi::addon::PVRMenuhook& menuhook,
-                                      const kodi::addon::PVRTimer& item)
-{
-  return CallMenuHook(menuhook);
-}
-
-PVR_ERROR CPVREon::CallRecordingMenuHook(const kodi::addon::PVRMenuhook& menuhook,
-                                          const kodi::addon::PVRRecording& item)
-{
-  return CallMenuHook(menuhook);
-}
-
-PVR_ERROR CPVREon::CallSettingsMenuHook(const kodi::addon::PVRMenuhook& menuhook)
-{
-  return CallMenuHook(menuhook);
-}
-
-PVR_ERROR CPVREon::CallMenuHook(const kodi::addon::PVRMenuhook& menuhook)
-{
-
-  int iMsg;
-  switch (menuhook.GetHookId())
-  {
-    case 1:
-      iMsg = 30010;
-      break;
-    case 2:
-      iMsg = 30011;
-      break;
-    case 3:
-      iMsg = 30012;
-      break;
-    case 4:
-      iMsg = 30012;
-      break;
-    default:
-      return PVR_ERROR_INVALID_PARAMETERS;
-  }
-  kodi::QueueNotification(QUEUE_INFO, "", kodi::addon::GetLocalizedString(iMsg));
-  return PVR_ERROR_NO_ERROR;
-}
-*/
 bool CPVREon::GetChannel(const kodi::addon::PVRChannel& channel, EonChannel& myChannel)
 {
   kodi::Log(ADDON_LOG_DEBUG, "function call: [%s]", __FUNCTION__);
