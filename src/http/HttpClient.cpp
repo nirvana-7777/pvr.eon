@@ -179,6 +179,7 @@ bool HttpClient::RefreshToken()
       kodi::gui::dialogs::OK::ShowAndGetInput(kodi::addon::GetLocalizedString(30046), text);
       url += "otp&otp=" + otp + "&device_number=" + m_settings->GetEonDeviceNumber();
     } else {
+      kodi::gui::dialogs::OK::ShowAndGetInput("PVR EON: " + kodi::addon::GetLocalizedString(30054), kodi::addon::GetLocalizedString(30055));
       kodi::Log(ADDON_LOG_ERROR, "Failed to refresh token");
       return false;
     }

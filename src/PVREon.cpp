@@ -137,7 +137,7 @@ bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapid
     result = m_httpClient->HttpGet(url, statusCode);
   } else
   {
-  //  kodi::Log(ADDON_LOG_DEBUG, "Body: %s", body.c_str());
+//    kodi::Log(ADDON_LOG_DEBUG, "Body: %s", body.c_str());
     result = m_httpClient->HttpPost(url, body, statusCode);
   }
   //kodi::Log(ADDON_LOG_DEBUG, "Result: %s", result.c_str());
@@ -145,11 +145,19 @@ bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapid
   if ((doc.GetParseError()) || (statusCode != 200 && statusCode != 206))
   {
     kodi::Log(ADDON_LOG_ERROR, "Failed to get JSON %s status code: %i", url.c_str(), statusCode);
-    if (doc.HasMember("error") && doc.HasMember("errorMessage"))
-    {
-      std::string title = Utils::JsonStringOrEmpty(doc, "error");
-      std::string abstract = Utils::JsonStringOrEmpty(doc, "errorMessage");
-      kodi::gui::dialogs::OK::ShowAndGetInput(title, abstract);
+    if (!body.empty()) {
+      kodi::Log(ADDON_LOG_ERROR, "Body was %s", body.c_str());
+    }
+    if (result.empty()) {
+      kodi::Log(ADDON_LOG_ERROR, "Empty result returned");
+    } else {
+      kodi::Log(ADDON_LOG_ERROR, "Result is: %s", result.c_str());
+      if (doc.HasMember("error") && doc.HasMember("errorMessage"))
+      {
+        std::string title = Utils::JsonStringOrEmpty(doc, "error");
+        std::string abstract = Utils::JsonStringOrEmpty(doc, "errorMessage");
+        kodi::gui::dialogs::OK::ShowAndGetInput(title, abstract);
+      }
     }
     return false;
   }
@@ -553,7 +561,7 @@ CPVREon::CPVREon() :
 */
     m_device_serial = m_settings->GetEonDeviceSerial();
     if (m_device_serial.empty()) {
-      std::string m_device_serial = m_httpClient->GetUUID();
+      m_device_serial = m_httpClient->GetUUID();
       m_settings->SetSetting("deviceserial", m_device_serial);
       kodi::Log(ADDON_LOG_DEBUG, "Generated Device Serial: %s", m_device_serial.c_str());
     }

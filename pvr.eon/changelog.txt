@@ -18,3 +18,5 @@ v20.7.3
   - Optionally use inputstream.ffmpegdirect
 v20.7.4
   - Exploit some more EPG data (live, age, seasons, episodes)
+v20.7.5
+  - Fix startup with empty credentials and web

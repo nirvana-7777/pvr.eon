@@ -232,6 +232,14 @@ msgctxt "#30053"
 msgid "inputstream.ffmpegdirect"
 msgstr "inputstream.ffmpegdirect"
 
+msgctxt "#30054"
+msgid "Authentication error"
+msgstr "Authentifizierungsfehler"
+
+msgctxt "#30055"
+msgid "Please enter or correct username and password in the settings"
+msgstr "Bitte Usernamen und Passwort in den Einstellungen ändern"
+
 msgctxt "#30500"
 msgid "Inputstream error"
 msgstr "Inputstream Fehler"
