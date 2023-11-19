@@ -14,6 +14,12 @@
 #include "http/HttpClient.h"
 #include "rapidjson/document.h"
 
+static const int INPUTSTREAM_ADAPTIVE = 0;
+static const int INPUTSTREAM_FFMPEGDIRECT = 1;
+
+static const int PLATFORM_WEB = 0;
+static const int PLATFORM_ANDROIDTV = 1;
+
 struct EonChannelCategory
 {
   int id;
@@ -25,7 +31,7 @@ struct EonPublishingPoint
   std::string publishingPoint;
   std::string audioLanguage;
   std::string subtitleLanguage;
-  std::vector<uint8_t> profileIds;
+  std::vector<int> profileIds;
 };
 
 struct EonChannel
@@ -100,6 +106,54 @@ struct EonCDN
   bool isDefault;
 };
 
+struct EonParameter
+{
+  std::string api_prefix;
+  std::string api_selector;
+  std::string device_type;
+  std::string device_name;
+  std::string device_model;
+  std::string device_platform;
+  std::string device_mac;
+  std::string client_sw_version;
+  std::string client_sw_build;
+  std::string system_sw;
+  std::string system_version;
+  std::string user_agent;
+};
+
+EonParameter EonParameters[2] = {{
+                                  //Web Client
+                                  "web",
+                                  "be",
+                                  "web_linux_chrome",
+                                  "",
+                                  "Chrome 116",
+                                  "web",
+                                  "",
+                                  "",
+                                  "",
+                                  "Linux",
+                                  "x86_64",
+                                  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36"
+                                 },
+                                 {
+                                  //Android TV
+                                  "android-tv",
+                                  "af31",
+                                  "Android 11",
+                                  "Android TV 30",
+                                  "SHIELD Android TV",
+                                  "android_tv",
+                                  "",
+                                  "8.1.3",
+                                  "8.1.35906",
+                                  "Android",
+                                  "11",
+                                  "Mozilla/5.0 (Linux; Android 11; SHIELD Android TV Build/RQ1A.210105.003; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/114.0.5735.196 Mobile Safari/537.36; XDKAndroidWebView/3.0.1/XDKWebView NVIDIA NVIDIA/mdarcy/mdarcy:11/RQ1A.210105.003/7825230_3167.5736:user/release-keys NVIDIA AndroidTV 1.00A_ATV SHIELD Android TV Android/11 ExoPlayer ((1.00A_ATV::1.14.1::androidtv::)"
+                                 }
+                                };
+
 class ATTR_DLL_LOCAL CPVREon : public kodi::addon::CAddonBase,
                                 public kodi::addon::CInstancePVRClient
 {
@@ -114,17 +168,6 @@ public:
 
   PVR_ERROR GetCapabilities(kodi::addon::PVRCapabilities& capabilities) override;
   PVR_ERROR GetDriveSpace(uint64_t& total, uint64_t& used) override;
-
-  PVR_ERROR CallEPGMenuHook(const kodi::addon::PVRMenuhook& menuhook,
-                            const kodi::addon::PVREPGTag& item) override;
-  PVR_ERROR CallChannelMenuHook(const kodi::addon::PVRMenuhook& menuhook,
-                                const kodi::addon::PVRChannel& item) override;
-  PVR_ERROR CallTimerMenuHook(const kodi::addon::PVRMenuhook& menuhook,
-                              const kodi::addon::PVRTimer& item) override;
-  PVR_ERROR CallRecordingMenuHook(const kodi::addon::PVRMenuhook& menuhook,
-                                  const kodi::addon::PVRRecording& item) override;
-  PVR_ERROR CallSettingsMenuHook(const kodi::addon::PVRMenuhook& menuhook) override;
-
   PVR_ERROR GetEPGForChannel(int channelUid,
                              time_t start,
                              time_t end,
@@ -167,12 +210,12 @@ private:
 
   void SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,
                            const std::string& url,
-                           bool realtime, bool playTimeshiftBuffer,
-                           const std::string& license);
+                           const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive,
+                           const int& starttime, const int& endtime);
 
- PVR_ERROR GetStreamProperties(
-   const EonChannel& channel,
-   std::vector<kodi::addon::PVRStreamProperty>& properties, int starttime, bool isLive);
+  PVR_ERROR GetStreamProperties(
+    const EonChannel& channel,
+    std::vector<kodi::addon::PVRStreamProperty>& properties, const int& starttime, const int& endtime, const bool& isLive);
 
   std::vector<EonChannel> m_channels;
   std::vector<EonServer> m_live_servers;
@@ -203,6 +246,7 @@ private:
 
   std::string m_api;
   std::string m_images_api;
+  int m_params;
 
 //  std::string m_ss_refresh;
 //  int m_active_profile_id;
@@ -213,6 +257,7 @@ private:
 
   std::string GetTime();
   int getBitrate(const bool isRadio, const int id);
+  bool GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc);
   std::string getCoreStreamId(const int id);
   std::string GetBaseApi(const std::string& cdn_identifier);
   std::string GetBrandIdentifier();
@@ -228,17 +273,4 @@ private:
   bool GetCategories(const bool isRadio);
   int GetDefaultNumber(const bool isRadio, int id);
   bool HandleSession(bool start, int cid, int epg_id);
-/*
-  bool HrtiLogin();
-  bool GetIpAddress();
-  bool GrantAccess();
-  bool RegisterDevice();
-  bool LoadChannels();
-  bool AuthorizeSession(std::string ref_id, std::string drm_id);
-  std::string GetLicense(std::string drm_id, std::string user_id);
-*/
-//  std::string ltrim(const std::string &s);
-//  std::string rtrim(const std::string &s);
-//  std::string trim(const std::string &s);
-//  std::string urlencode(const std::string &s);
 };

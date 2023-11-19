@@ -179,3 +179,75 @@ msgstr "EON Hrvatska"
 msgctxt "#30040"
 msgid "Nova"
 msgstr "Nova"
+
+msgctxt "#30041"
+msgid "Platform"
+msgstr "Plattform"
+
+msgctxt "#30042"
+msgid "Web"
+msgstr ""
+
+msgctxt "#30043"
+msgid "Android TV"
+msgstr ""
+
+msgctxt "#30044"
+msgid "WebOS"
+msgstr ""
+
+msgctxt "#30045"
+msgid "Use short channel names"
+msgstr "Kurze Sendernamen benutzen"
+
+msgctxt "#30046"
+msgid "Please enter OTP to register device"
+msgstr "Bitte OTP eingeben um das Gerät zu registrieren"
+
+msgctxt "#30047"
+msgid "Im Service Provider Self Service Portal Geräte auswählen und den 6-stelligen Code eingeben. Mit OK beenden. Sie haben noch "
+msgstr ""
+
+msgctxt "#30048"
+msgid "min Zeit."
+msgstr ""
+
+msgctxt "#30049"
+msgid "Streaming"
+msgstr "Streaming"
+
+msgctxt "#30050"
+msgid "Inputstream"
+msgstr "Inputstream"
+
+msgctxt "#30051"
+msgid "Select Inputstream"
+msgstr "Inputstream auswählen"
+
+msgctxt "#30052"
+msgid "inputstream.adaptive"
+msgstr "inputstream.adaptive"
+
+msgctxt "#30053"
+msgid "inputstream.ffmpegdirect"
+msgstr "inputstream.ffmpegdirect"
+
+msgctxt "#30054"
+msgid "Authentication error"
+msgstr "Authentifizierungsfehler"
+
+msgctxt "#30055"
+msgid "Please enter or correct username and password in the settings"
+msgstr "Bitte Usernamen und Passwort in den Einstellungen ändern"
+
+msgctxt "#30500"
+msgid "Inputstream error"
+msgstr "Inputstream Fehler"
+
+msgctxt "#30501"
+msgid "The %s addon is not installed."
+msgstr "Das %s Addon ist nicht installiert"
+
+msgctxt "#30502"
+msgid "The %s addon is not enabled."
+msgstr "Das %s Addon ist nicht aktiviert"

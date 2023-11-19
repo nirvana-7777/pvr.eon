@@ -21,6 +21,7 @@ public:
   bool RefreshGenericToken();
   void ClearSession();
   void SetApi(const std::string& api);
+  void SetSupportApi(const std::string& supportApi);
   std::string GetUUID();
    void SetStatusCodeHandler(HttpStatusCodeHandler* statusCodeHandler) {
     m_statusCodeHandler = statusCodeHandler;
@@ -31,6 +32,9 @@ private:
   std::string GenerateUUID();
   std::string m_uuid;
   std::string m_api;
+  std::string m_supportApi;
+  std::string client_id;
+  std::string client_secret;
   CSettings* m_settings;
   HttpStatusCodeHandler *m_statusCodeHandler = nullptr;
 };

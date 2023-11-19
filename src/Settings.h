@@ -19,6 +19,8 @@ public:
   bool VerifySettings();
 
   const int& GetEonServiceProvider() const { return m_eonServiceProvider; }
+  const int& GetPlatform() const { return m_eonPlatform; }
+  const int& GetInputstream() const { return m_eonInputstream; }
   const std::string& GetEonUsername() const { return m_eonUsername; }
   const std::string& GetEonPassword() const { return m_eonPassword; }
   const std::string& GetEonAccessToken() const { return m_eonAccessToken; }
@@ -38,9 +40,12 @@ public:
   const bool IsTVenabled() const { return m_enabletv; }
   const bool IsRadioenabled() const { return m_enableradio; }
   const bool IsGroupsenabled() const  { return m_enablegroups; }
+  const bool UseShortNames() const  { return m_shortnames; }
 
 private:
   int m_eonServiceProvider;
+  int m_eonPlatform;
+  int m_eonInputstream;
   std::string m_eonUsername;
   std::string m_eonPassword;
   std::string m_eonAccessToken;
@@ -60,4 +65,5 @@ private:
   bool m_enabletv;
   bool m_enableradio;
   bool m_enablegroups;
+  bool m_shortnames;
 };
