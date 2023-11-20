@@ -210,12 +210,12 @@ private:
 
   void SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,
                            const std::string& url,
-                           const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive,
-                           const int& starttime, const int& endtime);
+                           const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive /*,
+                          time_t starttime, time_t endtime*/);
 
   PVR_ERROR GetStreamProperties(
     const EonChannel& channel,
-    std::vector<kodi::addon::PVRStreamProperty>& properties, const int& starttime, const int& endtime, const bool& isLive);
+    std::vector<kodi::addon::PVRStreamProperty>& properties, time_t starttime,/* time_t endtime, */const bool& isLive);
 
   std::vector<EonChannel> m_channels;
   std::vector<EonServer> m_live_servers;

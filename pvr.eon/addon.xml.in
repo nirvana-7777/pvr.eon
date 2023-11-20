@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addon
   id="pvr.eon"
-  version="20.7.5"
+  version="20.7.6"
   name="EON PVR Client"
   provider-name="Nirvana">
   <requires>
     @ADDON_DEPENDS@
-    <import addon="inputstream.ffmpegdirect" minversion="20.0.0"/>
     <import addon="inputstream.adaptive" minversion="20.0.0"/>
     <import addon="script.module.inputstreamhelper" version="0.5.8"/>
   </requires>

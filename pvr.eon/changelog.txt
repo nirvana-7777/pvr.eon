@@ -20,3 +20,5 @@ v20.7.4
   - Exploit some more EPG data (live, age, seasons, episodes)
 v20.7.5
   - Fix startup with empty credentials and web
+v20.7.6
+  - Try to fix armv7a
