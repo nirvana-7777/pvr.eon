@@ -269,7 +269,7 @@ bool CPVREon::GetCDNInfo()
 
     const rapidjson::Value& baseApi = cdnItem["domains"]["baseApi"];
 
-    cdn.baseApi = Utils::JsonStringOrEmpty(baseApi, EonParameters[m_params].api_selector.c_str());
+    cdn.baseApi = Utils::JsonStringOrEmpty(baseApi, EonParameters[m_platform].api_selector.c_str());
     m_cdns.emplace_back(cdn);
   }
 
@@ -311,25 +311,25 @@ bool CPVREon::GetDeviceFromSerial()
 {
   std::string postData;
 
-  if (m_settings->GetPlatform() == PLATFORM_ANDROIDTV) {
-    postData = "{\"deviceName\":\"" + EonParameters[m_params].device_name +
-                  "\",\"deviceType\":\"" + EonParameters[m_params].device_type +
-                  "\",\"modelName\":\"" + EonParameters[m_params].device_model +
-                  "\",\"platform\":\"" + EonParameters[m_params].device_platform +
+  if (m_platform == PLATFORM_ANDROIDTV) {
+    postData = "{\"deviceName\":\"" + EonParameters[m_platform].device_name +
+                  "\",\"deviceType\":\"" + EonParameters[m_platform].device_type +
+                  "\",\"modelName\":\"" + EonParameters[m_platform].device_model +
+                  "\",\"platform\":\"" + EonParameters[m_platform].device_platform +
                   "\",\"serial\":\"" + m_device_serial +
-                  "\",\"clientSwVersion\":\"" + EonParameters[m_params].client_sw_version +
-                  "\",\"clientSwBuild\":\"" + EonParameters[m_params].client_sw_build +
-                  "\",\"systemSwVersion\":{\"name\":\"" + EonParameters[m_params].system_sw +
-                  "\",\"version\":\"" + EonParameters[m_params].system_version +
+                  "\",\"clientSwVersion\":\"" + EonParameters[m_platform].client_sw_version +
+                  "\",\"clientSwBuild\":\"" + EonParameters[m_platform].client_sw_build +
+                  "\",\"systemSwVersion\":{\"name\":\"" + EonParameters[m_platform].system_sw +
+                  "\",\"version\":\"" + EonParameters[m_platform].system_version +
                   "\"},\"fcmToken\":\"\"}";
         //TODO: implement parameter fcmToken...
   } else {
-    postData = "{\"deviceName\":\"\",\"deviceType\":\"" + EonParameters[m_params].device_type +
-                  "\",\"modelName\":\"" + EonParameters[m_params].device_model +
-                  "\",\"platform\":\"" + EonParameters[m_params].device_platform +
+    postData = "{\"deviceName\":\"\",\"deviceType\":\"" + EonParameters[m_platform].device_type +
+                  "\",\"modelName\":\"" + EonParameters[m_platform].device_model +
+                  "\",\"platform\":\"" + EonParameters[m_platform].device_platform +
                   "\",\"serial\":\"" + m_device_serial +
-                  "\",\"clientSwVersion\":\"\",\"systemSwVersion\":{\"name\":\"" + EonParameters[m_params].system_sw +
-                  "\",\"version\":\"" + EonParameters[m_params].system_version + "\"}}";
+                  "\",\"clientSwVersion\":\"\",\"systemSwVersion\":{\"name\":\"" + EonParameters[m_platform].system_sw +
+                  "\",\"version\":\"" + EonParameters[m_platform].system_version + "\"}}";
   }
 
   std::string url = m_api + "v1/devices";
@@ -519,7 +519,7 @@ CPVREon::CPVREon() :
   m_settings->Load();
   m_httpClient = new HttpClient(m_settings);
 
-  m_params = m_settings->GetPlatform();
+  m_platform = m_settings->GetPlatform();
   m_support_web = "API_NOT_SET_YET";
   m_httpClient->SetSupportApi(m_support_web);
 
@@ -529,11 +529,11 @@ CPVREon::CPVREon() :
     std::string cdn_identifier = GetBrandIdentifier();
     kodi::Log(ADDON_LOG_DEBUG, "CDN Identifier: %s", cdn_identifier.c_str());
     std::string baseApi = GetBaseApi(cdn_identifier);
-    m_api = "https://api-" + EonParameters[m_params].api_prefix + "." + baseApi + "/";
-    m_images_api = "https://images-" + EonParameters[m_params].api_prefix + "." + baseApi + "/";
+    m_api = "https://api-" + EonParameters[m_platform].api_prefix + "." + baseApi + "/";
+    m_images_api = "https://images-" + EonParameters[m_platform].api_prefix + "." + baseApi + "/";
   } else {
-    m_api = "https://api-" + EonParameters[m_params].api_prefix + "." + GLOBAL_URL;
-    m_images_api = "https://images-" + EonParameters[m_params].api_prefix + "." + GLOBAL_URL;
+    m_api = "https://api-" + EonParameters[m_platform].api_prefix + "." + GLOBAL_URL;
+    m_images_api = "https://images-" + EonParameters[m_platform].api_prefix + "." + GLOBAL_URL;
   }
   m_httpClient->SetApi(m_api);
   kodi::Log(ADDON_LOG_DEBUG, "API set to: %s", m_api.c_str());
@@ -790,7 +790,7 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
     properties.emplace_back("inputstream.adaptive.stream_selection_type", "fixed-res");
     properties.emplace_back("inputstream.adaptive.chooser_resolution_max", "4K");
     //properties.emplace_back("inputstream.adaptive.stream_selection_type", "fixed-res");
-    properties.emplace_back("inputstream.adaptive.manifest_headers", "User-Agent=" + EonParameters[m_params].user_agent);
+    properties.emplace_back("inputstream.adaptive.manifest_headers", "User-Agent=" + EonParameters[m_platform].user_agent);
     // properties.emplace_back("inputstream.adaptive.manifest_update_parameter", "full");
   } else if (inputstream == INPUTSTREAM_FFMPEGDIRECT)
   {
@@ -1078,7 +1078,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
 
     std::string plain_aes;
 
-    if (m_settings->GetPlatform() == PLATFORM_ANDROIDTV) {
+    if (m_platform == PLATFORM_ANDROIDTV) {
       plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
                   "stream=" + streaming_profile + ";" +
                   "sp=" + m_service_provider + ";" +
@@ -1136,14 +1136,14 @@ PVR_ERROR CPVREon::GetStreamProperties(
     std::string enc_url = "https://" + currentServer.hostname +
                           "/stream?i=" + urlsafeencode(base64_encode(iv_str.c_str(), iv_str.length())) +
                           "&a=" + urlsafeencode(base64_encode(enc_str.c_str(), enc_str.length()));
-    if (m_settings->GetPlatform() == PLATFORM_ANDROIDTV) {
+    if (m_platform == PLATFORM_ANDROIDTV) {
       enc_url = enc_url + "&lang=eng";
     }
     enc_url = enc_url +   "&sp=" + m_service_provider +
                           "&u=" + m_settings->GetEonStreamUser() +
                           "&player=" + PLAYER +
                           "&session=" + m_session_id;
-    if (m_settings->GetPlatform() != PLATFORM_ANDROIDTV) {
+    if (m_platform != PLATFORM_ANDROIDTV) {
       enc_url = enc_url + "&sig=" + channel.sig;
     }
 
@@ -1312,7 +1312,7 @@ bool CPVREon::GetServer(bool isLive, EonServer& myServer)
     servers = m_timeshift_servers;
   }
   int target_server = 2;
-  if (m_settings->GetPlatform() == PLATFORM_ANDROIDTV) {
+  if (m_platform == PLATFORM_ANDROIDTV) {
     target_server = 3;
   }
   int count = 0;

@@ -33,8 +33,11 @@ private:
   std::string m_uuid;
   std::string m_api;
   std::string m_supportApi;
+  int m_platform;
+  /*
   std::string client_id;
   std::string client_secret;
+  */
   CSettings* m_settings;
   HttpStatusCodeHandler *m_statusCodeHandler = nullptr;
 };
