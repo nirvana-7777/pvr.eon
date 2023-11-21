@@ -144,13 +144,9 @@ bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapid
   doc.Parse(result.c_str());
   if ((doc.GetParseError()) || (statusCode != 200 && statusCode != 206))
   {
-    kodi::Log(ADDON_LOG_ERROR, "Failed to get JSON %s status code: %i", url.c_str(), statusCode);
-    if (!body.empty()) {
-      kodi::Log(ADDON_LOG_ERROR, "Body was %s", body.c_str());
-    }
-    if (result.empty()) {
-      kodi::Log(ADDON_LOG_ERROR, "Empty result returned");
-    } else {
+    kodi::Log(ADDON_LOG_ERROR, "Failed to get JSON for URL %s and body %s. Status code: %i", url.c_str(), body.c_str(), statusCode);
+    if (!doc.GetParseError())
+    {
       kodi::Log(ADDON_LOG_ERROR, "Result is: %s", result.c_str());
       if (doc.HasMember("error") && doc.HasMember("errorMessage"))
       {
@@ -273,7 +269,7 @@ bool CPVREon::GetCDNInfo()
 
     const rapidjson::Value& baseApi = cdnItem["domains"]["baseApi"];
 
-    cdn.baseApi = Utils::JsonStringOrEmpty(baseApi, EonParameters[m_params].api_selector.c_str());
+    cdn.baseApi = Utils::JsonStringOrEmpty(baseApi, EonParameters[m_platform].api_selector.c_str());
     m_cdns.emplace_back(cdn);
   }
 
@@ -315,25 +311,25 @@ bool CPVREon::GetDeviceFromSerial()
 {
   std::string postData;
 
-  if (m_settings->GetPlatform() == PLATFORM_ANDROIDTV) {
-    postData = "{\"deviceName\":\"" + EonParameters[m_params].device_name +
-                  "\",\"deviceType\":\"" + EonParameters[m_params].device_type +
-                  "\",\"modelName\":\"" + EonParameters[m_params].device_model +
-                  "\",\"platform\":\"" + EonParameters[m_params].device_platform +
+  if (m_platform == PLATFORM_ANDROIDTV) {
+    postData = "{\"deviceName\":\"" + EonParameters[m_platform].device_name +
+                  "\",\"deviceType\":\"" + EonParameters[m_platform].device_type +
+                  "\",\"modelName\":\"" + EonParameters[m_platform].device_model +
+                  "\",\"platform\":\"" + EonParameters[m_platform].device_platform +
                   "\",\"serial\":\"" + m_device_serial +
-                  "\",\"clientSwVersion\":\"" + EonParameters[m_params].client_sw_version +
-                  "\",\"clientSwBuild\":\"" + EonParameters[m_params].client_sw_build +
-                  "\",\"systemSwVersion\":{\"name\":\"" + EonParameters[m_params].system_sw +
-                  "\",\"version\":\"" + EonParameters[m_params].system_version +
+                  "\",\"clientSwVersion\":\"" + EonParameters[m_platform].client_sw_version +
+                  "\",\"clientSwBuild\":\"" + EonParameters[m_platform].client_sw_build +
+                  "\",\"systemSwVersion\":{\"name\":\"" + EonParameters[m_platform].system_sw +
+                  "\",\"version\":\"" + EonParameters[m_platform].system_version +
                   "\"},\"fcmToken\":\"\"}";
         //TODO: implement parameter fcmToken...
   } else {
-    postData = "{\"deviceName\":\"\",\"deviceType\":\"" + EonParameters[m_params].device_type +
-                  "\",\"modelName\":\"" + EonParameters[m_params].device_model +
-                  "\",\"platform\":\"" + EonParameters[m_params].device_platform +
+    postData = "{\"deviceName\":\"\",\"deviceType\":\"" + EonParameters[m_platform].device_type +
+                  "\",\"modelName\":\"" + EonParameters[m_platform].device_model +
+                  "\",\"platform\":\"" + EonParameters[m_platform].device_platform +
                   "\",\"serial\":\"" + m_device_serial +
-                  "\",\"clientSwVersion\":\"\",\"systemSwVersion\":{\"name\":\"" + EonParameters[m_params].system_sw +
-                  "\",\"version\":\"" + EonParameters[m_params].system_version + "\"}}";
+                  "\",\"clientSwVersion\":\"\",\"systemSwVersion\":{\"name\":\"" + EonParameters[m_platform].system_sw +
+                  "\",\"version\":\"" + EonParameters[m_platform].system_version + "\"}}";
   }
 
   std::string url = m_api + "v1/devices";
@@ -523,7 +519,7 @@ CPVREon::CPVREon() :
   m_settings->Load();
   m_httpClient = new HttpClient(m_settings);
 
-  m_params = m_settings->GetPlatform();
+  m_platform = m_settings->GetPlatform();
   m_support_web = "API_NOT_SET_YET";
   m_httpClient->SetSupportApi(m_support_web);
 
@@ -533,11 +529,11 @@ CPVREon::CPVREon() :
     std::string cdn_identifier = GetBrandIdentifier();
     kodi::Log(ADDON_LOG_DEBUG, "CDN Identifier: %s", cdn_identifier.c_str());
     std::string baseApi = GetBaseApi(cdn_identifier);
-    m_api = "https://api-" + EonParameters[m_params].api_prefix + "." + baseApi + "/";
-    m_images_api = "https://images-" + EonParameters[m_params].api_prefix + "." + baseApi + "/";
+    m_api = "https://api-" + EonParameters[m_platform].api_prefix + "." + baseApi + "/";
+    m_images_api = "https://images-" + EonParameters[m_platform].api_prefix + "." + baseApi + "/";
   } else {
-    m_api = "https://api-" + EonParameters[m_params].api_prefix + "." + GLOBAL_URL;
-    m_images_api = "https://images-" + EonParameters[m_params].api_prefix + "." + GLOBAL_URL;
+    m_api = "https://api-" + EonParameters[m_platform].api_prefix + "." + GLOBAL_URL;
+    m_images_api = "https://images-" + EonParameters[m_platform].api_prefix + "." + GLOBAL_URL;
   }
   m_httpClient->SetApi(m_api);
   kodi::Log(ADDON_LOG_DEBUG, "API set to: %s", m_api.c_str());
@@ -768,14 +764,13 @@ bool CPVREon::HandleSession(bool start, int cid, int epg_id)
 
 void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,
                                     const std::string& url,
-                                    const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive,
-                                    const int& starttime, const int& endtime)
+                                    const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive/*,
+                                    time_t starttime, time_t endtime*/)
 {
   kodi::Log(ADDON_LOG_DEBUG, "[PLAY STREAM] url: %s", url.c_str());
 
   properties.emplace_back(PVR_STREAM_PROPERTY_STREAMURL, url);
   properties.emplace_back(PVR_STREAM_PROPERTY_ISREALTIMESTREAM, realtime ? "true" : "false");
-  properties.emplace_back(PVR_STREAM_PROPERTY_MIMETYPE, "application/x-mpegURL");
 
   int inputstream = m_settings->GetInputstream();
 
@@ -791,8 +786,11 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
     properties.emplace_back("inputstream.adaptive.manifest_type", "hls");
     //  properties.emplace_back("inputstream.adaptive.original_audio_language", "bs");
     //  properties.emplace_back("inputstream.adaptive.stream_selection_type", "adaptive");
-    properties.emplace_back("inputstream.adaptive.stream_selection_type", "manual-osd");
-    properties.emplace_back("inputstream.adaptive.manifest_headers", "User-Agent=" + EonParameters[m_params].user_agent);
+    // properties.emplace_back("inputstream.adaptive.stream_selection_type", "manual-osd");
+    properties.emplace_back("inputstream.adaptive.stream_selection_type", "fixed-res");
+    properties.emplace_back("inputstream.adaptive.chooser_resolution_max", "4K");
+    //properties.emplace_back("inputstream.adaptive.stream_selection_type", "fixed-res");
+    properties.emplace_back("inputstream.adaptive.manifest_headers", "User-Agent=" + EonParameters[m_platform].user_agent);
     // properties.emplace_back("inputstream.adaptive.manifest_update_parameter", "full");
   } else if (inputstream == INPUTSTREAM_FFMPEGDIRECT)
   {
@@ -817,8 +815,8 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
   } else {
     kodi::Log(ADDON_LOG_DEBUG, "Unknown inputstream detected");
   }
+  properties.emplace_back(PVR_STREAM_PROPERTY_MIMETYPE, "application/x-mpegURL");
 }
-
 
 PVR_ERROR CPVREon::GetCapabilities(kodi::addon::PVRCapabilities& capabilities)
 {
@@ -913,10 +911,10 @@ PVR_ERROR CPVREon::GetEPGForChannel(int channelUid,
       tag.SetUniqueChannelId(channelUid);
       tag.SetTitle(Utils::JsonStringOrEmpty(epgItem,"title"));
       tag.SetOriginalTitle(Utils::JsonStringOrEmpty(epgItem,"originalTitle"));
-      int64_t starttime = Utils::JsonInt64OrZero(epgItem,"startTime") / 1000;
-      int64_t endtime = Utils::JsonInt64OrZero(epgItem,"endTime") / 1000;
-      tag.SetStartTime((int)starttime);
-      tag.SetEndTime((int)endtime);
+      time_t starttime = (time_t) (Utils::JsonInt64OrZero(epgItem,"startTime") / 1000);
+      time_t endtime = (time_t) (Utils::JsonInt64OrZero(epgItem,"endTime") / 1000);
+      tag.SetStartTime(starttime);
+      tag.SetEndTime(endtime);
       tag.SetPlot(Utils::JsonStringOrEmpty(epgItem,"shortDescription"));
       int seasonNumber = Utils::JsonIntOrZero(epgItem,"seasonNumber");
       if (seasonNumber != 0)
@@ -993,7 +991,7 @@ PVR_ERROR CPVREon::GetEPGTagStreamProperties(
   {
     if (channel.iUniqueId == tag.GetUniqueChannelId())
     {
-      return GetStreamProperties(channel, properties, tag.GetStartTime(), tag.GetEndTime(), false);
+      return GetStreamProperties(channel, properties, tag.GetStartTime(), /*tag.GetEndTime(),*/ false);
     }
   }
   return PVR_ERROR_NO_ERROR;
@@ -1049,7 +1047,7 @@ PVR_ERROR CPVREon::GetChannels(bool bRadio, kodi::addon::PVRChannelsResultSet& r
 }
 
 PVR_ERROR CPVREon::GetStreamProperties(
-    const EonChannel& channel, std::vector<kodi::addon::PVRStreamProperty>& properties, const int& starttime, const int& endtime, const bool& isLive)
+    const EonChannel& channel, std::vector<kodi::addon::PVRStreamProperty>& properties, time_t starttime,/* time_t endtime,*/ const bool& isLive)
 {
     kodi::Log(ADDON_LOG_DEBUG, "function call: [%s]", __FUNCTION__);
     std::string streaming_profile = "hp7000";
@@ -1080,7 +1078,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
 
     std::string plain_aes;
 
-    if (m_settings->GetPlatform() == PLATFORM_ANDROIDTV) {
+    if (m_platform == PLATFORM_ANDROIDTV) {
       plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
                   "stream=" + streaming_profile + ";" +
                   "sp=" + m_service_provider + ";" +
@@ -1098,7 +1096,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
                   "session=" + m_session_id + ";" +
                   "maxvbr=" + std::to_string(rndbitrate);
                   if (!isLive) {
-                    plain_aes = plain_aes + ";t=" + std::to_string(starttime) + "000;";
+                    plain_aes = plain_aes + ";t=" + std::to_string((int) starttime) + "000;";
                   }
     } else {
       plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
@@ -1113,7 +1111,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
                   "ctime=" + GetTime() + ";" +
                   "conn=" + CONN_TYPE_BROWSER + ";";
                   if (!isLive) {
-                    plain_aes = plain_aes + "t=" + std::to_string(starttime) + "000;";
+                    plain_aes = plain_aes + "t=" + std::to_string((int) starttime) + "000;";
                   }
                   plain_aes = plain_aes + "aa=" + (channel.aaEnabled ? "true" : "false");
     }
@@ -1138,20 +1136,23 @@ PVR_ERROR CPVREon::GetStreamProperties(
     std::string enc_url = "https://" + currentServer.hostname +
                           "/stream?i=" + urlsafeencode(base64_encode(iv_str.c_str(), iv_str.length())) +
                           "&a=" + urlsafeencode(base64_encode(enc_str.c_str(), enc_str.length()));
-    if (m_settings->GetPlatform() == PLATFORM_ANDROIDTV) {
+    if (m_platform == PLATFORM_ANDROIDTV) {
       enc_url = enc_url + "&lang=eng";
     }
     enc_url = enc_url +   "&sp=" + m_service_provider +
                           "&u=" + m_settings->GetEonStreamUser() +
                           "&player=" + PLAYER +
                           "&session=" + m_session_id;
-    if (m_settings->GetPlatform() != PLATFORM_ANDROIDTV) {
+    if (m_platform != PLATFORM_ANDROIDTV) {
       enc_url = enc_url + "&sig=" + channel.sig;
     }
 
     kodi::Log(ADDON_LOG_DEBUG, "Encrypted Stream URL -> %s", enc_url.c_str());
 
-    SetStreamProperties(properties, enc_url, true, false, isLive, starttime, endtime);
+    SetStreamProperties(properties, enc_url, true, false, isLive/*, starttime, endtime*/);
+
+    for (auto& prop : properties)
+        kodi::Log(ADDON_LOG_DEBUG, "Name: %s Value: %s", prop.GetName().c_str(), prop.GetValue().c_str());
 
   return PVR_ERROR_NO_ERROR;
 }
@@ -1163,7 +1164,7 @@ PVR_ERROR CPVREon::GetChannelStreamProperties(
   EonChannel addonChannel;
   if (GetChannel(channel, addonChannel)) {
     if (addonChannel.subscribed) {
-        return GetStreamProperties(addonChannel, properties, 0, 0, true);
+      return GetStreamProperties(addonChannel, properties, 0,/* 0,*/ true);
     }
     kodi::Log(ADDON_LOG_DEBUG, "Channel not subscribed");
     return PVR_ERROR_SERVER_ERROR;
@@ -1311,7 +1312,7 @@ bool CPVREon::GetServer(bool isLive, EonServer& myServer)
     servers = m_timeshift_servers;
   }
   int target_server = 2;
-  if (m_settings->GetPlatform() == PLATFORM_ANDROIDTV) {
+  if (m_platform == PLATFORM_ANDROIDTV) {
     target_server = 3;
   }
   int count = 0;

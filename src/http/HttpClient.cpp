@@ -27,7 +27,7 @@ bool HttpClient::RefreshGenericToken()
   std::string url = BROKER_URL + "oauth/token?grant_type=client_credentials";
   std::string postData = "{}";
 
-  std::string basic_token = client_id + ":" + client_secret;
+  std::string basic_token = EonParameters[m_platform].client_id + ":" + EonParameters[m_platform].client_secret;
   // Copy input data to a buffer that will be encrypted
 //  Botan::secure_vector<uint8_t> bt(basic_token.data(), basic_token.data() + basic_token.length());
 //  std::string test1 = base64_encode(basic_token.c_str(), basic_token.length());
@@ -187,7 +187,7 @@ bool HttpClient::RefreshToken()
 
   int statusCode;
 
-  std::string basic_token = client_id + ":" + client_secret;
+  std::string basic_token = EonParameters[m_platform].client_id + ":" + EonParameters[m_platform].client_secret;
   curl_auth.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
 
   std::string content_auth = HttpRequestToCurl(curl_auth, "POST", url, postData, statusCode);
@@ -222,6 +222,8 @@ bool HttpClient::RefreshToken()
 HttpClient::HttpClient(CSettings* settings):
   m_settings(settings)
 {
+  m_platform = m_settings->GetPlatform();
+  /*
   if (m_settings->GetPlatform() == 1) {
     client_id = CLIENT_ID_ATV;
     client_secret = CLIENT_SECRET_ATV;
@@ -229,6 +231,7 @@ HttpClient::HttpClient(CSettings* settings):
     client_id = CLIENT_ID_WEB;
     client_secret = CLIENT_SECRET_WEB;
   }
+  */
 }
 
 HttpClient::~HttpClient()
@@ -331,7 +334,7 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
     if (!access_token.empty()) {
       curl.AddHeader("Authorization", "bearer " + access_token);
     } else {
-      std::string basic_token = client_id + ":" + client_secret;
+      std::string basic_token = EonParameters[m_platform].client_id + ":" + EonParameters[m_platform].client_secret;
       curl.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
     }
   }
