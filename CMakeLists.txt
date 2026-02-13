@@ -19,6 +19,7 @@ set(EON_SOURCES
   src/pkcs7_padding.c
   src/Utils.cpp
   src/Settings.cpp
+  src/StreamRedirectProxy.cpp
   src/PVREon.cpp
 )
 
@@ -33,6 +34,7 @@ set(EON_HEADERS
   src/pkcs7_padding.h
   src/Utils.h
   src/Settings.h
+  src/StreamRedirectProxy.h
   src/PVREon.h
   src/Globals.h
 )
