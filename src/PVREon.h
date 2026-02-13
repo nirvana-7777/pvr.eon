@@ -11,6 +11,7 @@
 
 #include <kodi/addon-instance/PVR.h>
 #include "Settings.h"
+#include "StreamRedirectProxy.h"
 #include "http/HttpClient.h"
 #include "rapidjson/document.h"
 
@@ -149,6 +150,7 @@ public:
   PVR_ERROR GetRecordingStreamProperties(
       const kodi::addon::PVRRecording& recording,
       std::vector<kodi::addon::PVRStreamProperty>& properties) override;
+  PVR_ERROR GetStreamTimes(kodi::addon::PVRStreamTimes& times) override;
 
   ADDON_STATUS SetSetting(const std::string& settingName,
                         const std::string& settingValue);
@@ -161,8 +163,8 @@ protected:
 private:
   void SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,
                            const std::string& url,
-                           const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive /*,
-                          time_t starttime, time_t endtime*/);
+                           const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive,
+                           time_t starttime, time_t endtime);
 
   PVR_ERROR GetStreamProperties(
     const EonChannel& channel,
@@ -190,6 +192,12 @@ private:
   std::string m_session_id;
   std::string m_stream_key;
   std::string m_stream_un;
+
+  // Current playback tracking for progress bar / timeline
+  time_t m_stream_start_time = 0;
+  time_t m_stream_end_time = 0;
+  bool m_stream_is_live = false;
+  int m_stream_channel_id = 0;
   std::string m_service_provider;
   std::string m_support_web;
 //  std::string m_ss_access;
@@ -205,6 +213,7 @@ private:
 
   HttpClient *m_httpClient;
   CSettings* m_settings;
+  StreamRedirectProxy m_redirectProxy;
 
   std::string GetTime();
   int getBitrate(const bool isRadio, const int id);

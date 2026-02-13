@@ -764,55 +764,72 @@ bool CPVREon::HandleSession(bool start, int cid, int epg_id)
 
 void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,
                                     const std::string& url,
-                                    const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive/*,
-                                    time_t starttime, time_t endtime*/)
+                                    const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive,
+                                    time_t starttime, time_t endtime)
 {
-  kodi::Log(ADDON_LOG_DEBUG, "[PLAY STREAM] url: %s", url.c_str());
+  kodi::Log(ADDON_LOG_DEBUG, "[PLAY STREAM] url: %s isLive: %s", url.c_str(), isLive ? "true" : "false");
 
   properties.emplace_back(PVR_STREAM_PROPERTY_STREAMURL, url);
   properties.emplace_back(PVR_STREAM_PROPERTY_ISREALTIMESTREAM, realtime ? "true" : "false");
 
   int inputstream = m_settings->GetInputstream();
 
-  if (inputstream == INPUTSTREAM_ADAPTIVE)
+  // For replay/catchup: always use ffmpegdirect (it supports catchup buffer times
+  // and programme duration, which inputstream.adaptive does not).
+  // For live: use whichever the user selected.
+  bool useFFmpegDirect = !isLive || (inputstream == INPUTSTREAM_FFMPEGDIRECT);
+  bool useAdaptive = isLive && (inputstream == INPUTSTREAM_ADAPTIVE);
+
+  if (useAdaptive)
   {
     if (!Utils::CheckInputstreamInstalledAndEnabled("inputstream.adaptive"))
     {
       kodi::Log(ADDON_LOG_DEBUG, "inputstream.adaptive selected but not installed or enabled");
       return;
     }
-    kodi::Log(ADDON_LOG_DEBUG, "...using inputstream.adaptive");
+    kodi::Log(ADDON_LOG_DEBUG, "...using inputstream.adaptive (live)");
     properties.emplace_back(PVR_STREAM_PROPERTY_INPUTSTREAM, "inputstream.adaptive");
     properties.emplace_back("inputstream.adaptive.manifest_type", "hls");
-    //  properties.emplace_back("inputstream.adaptive.original_audio_language", "bs");
-    //  properties.emplace_back("inputstream.adaptive.stream_selection_type", "adaptive");
-    // properties.emplace_back("inputstream.adaptive.stream_selection_type", "manual-osd");
     properties.emplace_back("inputstream.adaptive.stream_selection_type", "fixed-res");
     properties.emplace_back("inputstream.adaptive.chooser_resolution_max", "4K");
-    //properties.emplace_back("inputstream.adaptive.stream_selection_type", "fixed-res");
     properties.emplace_back("inputstream.adaptive.manifest_headers", "User-Agent=" + EonParameters[m_platform].user_agent);
-    // properties.emplace_back("inputstream.adaptive.manifest_update_parameter", "full");
-  } else if (inputstream == INPUTSTREAM_FFMPEGDIRECT)
+  }
+  else if (useFFmpegDirect)
   {
     if (!Utils::CheckInputstreamInstalledAndEnabled("inputstream.ffmpegdirect"))
     {
-      kodi::Log(ADDON_LOG_DEBUG, "inputstream.ffmpegdirect selected but not installed or enabled");
+      kodi::Log(ADDON_LOG_DEBUG, "inputstream.ffmpegdirect not installed or enabled, falling back to adaptive");
+      // Fallback to adaptive if ffmpegdirect not available
+      if (Utils::CheckInputstreamInstalledAndEnabled("inputstream.adaptive"))
+      {
+        properties.emplace_back(PVR_STREAM_PROPERTY_INPUTSTREAM, "inputstream.adaptive");
+        properties.emplace_back("inputstream.adaptive.manifest_type", "hls");
+        properties.emplace_back("inputstream.adaptive.stream_selection_type", "fixed-res");
+        properties.emplace_back("inputstream.adaptive.chooser_resolution_max", "4K");
+        properties.emplace_back("inputstream.adaptive.manifest_headers", "User-Agent=" + EonParameters[m_platform].user_agent);
+      }
+      properties.emplace_back(PVR_STREAM_PROPERTY_MIMETYPE, "application/x-mpegURL");
       return;
     }
-    kodi::Log(ADDON_LOG_DEBUG, "...using inputstream.ffmpegdirect");
+    kodi::Log(ADDON_LOG_DEBUG, "...using inputstream.ffmpegdirect (isLive=%s)", isLive ? "true" : "false");
     properties.emplace_back(PVR_STREAM_PROPERTY_INPUTSTREAM, "inputstream.ffmpegdirect");
     properties.emplace_back("inputstream.ffmpegdirect.manifest_type", "hls");
-    properties.emplace_back("inputstream.ffmpegdirect.is_realtime_stream", "true");
+    properties.emplace_back("inputstream.ffmpegdirect.is_realtime_stream", isLive ? "true" : "false");
     properties.emplace_back("inputstream.ffmpegdirect.stream_mode", isLive ? "timeshift" : "catchup");
-/*
-    if (!isLive) {
-      properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_start_time", std::to_string(starttime));
-      properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_end_time", std::to_string(endtime));
+
+    if (!isLive && starttime > 0 && endtime > starttime)
+    {
+      kodi::Log(ADDON_LOG_DEBUG, "Setting catchup times: start=%lld end=%lld duration=%lld",
+                (long long)starttime, (long long)endtime, (long long)(endtime - starttime));
       properties.emplace_back("inputstream.ffmpegdirect.programme_start_time", std::to_string(starttime));
       properties.emplace_back("inputstream.ffmpegdirect.programme_end_time", std::to_string(endtime));
+      properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_start_time", std::to_string(starttime));
+      properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_end_time", std::to_string(endtime));
+      properties.emplace_back("inputstream.ffmpegdirect.playback_as_live", "false");
     }
-*/
-  } else {
+  }
+  else
+  {
     kodi::Log(ADDON_LOG_DEBUG, "Unknown inputstream detected");
   }
   properties.emplace_back(PVR_STREAM_PROPERTY_MIMETYPE, "application/x-mpegURL");
@@ -991,6 +1008,14 @@ PVR_ERROR CPVREon::GetEPGTagStreamProperties(
   {
     if (channel.iUniqueId == tag.GetUniqueChannelId())
     {
+      // Track replay playback for GetStreamTimes()
+      m_stream_is_live = false;
+      m_stream_channel_id = channel.iUniqueId;
+      m_stream_start_time = tag.GetStartTime();
+      m_stream_end_time = tag.GetEndTime();
+      kodi::Log(ADDON_LOG_DEBUG, "EPG Tag playback: start=%lld end=%lld duration=%lld",
+                (long long)m_stream_start_time, (long long)m_stream_end_time,
+                (long long)(m_stream_end_time - m_stream_start_time));
       return GetStreamProperties(channel, properties, tag.GetStartTime(), /*tag.GetEndTime(),*/ false);
     }
   }
@@ -1150,7 +1175,66 @@ PVR_ERROR CPVREon::GetStreamProperties(
 
     kodi::Log(ADDON_LOG_DEBUG, "Encrypted Stream URL -> %s", enc_url.c_str());
 
-    SetStreamProperties(properties, enc_url, true, false, isLive/*, starttime, endtime*/);
+    SetStreamProperties(properties, enc_url, isLive, false, isLive, starttime, m_stream_end_time);
+
+    // For replay: start a local redirect proxy that generates fresh encrypted
+    // URLs for each seek position. The t= timestamp must be INSIDE the AES
+    // payload, so we can't just append it as a query parameter.
+    if (!isLive && m_stream_end_time > starttime)
+    {
+      // Compute server time offset so the proxy can generate accurate ctime
+      // values without making API calls for each seek.
+      std::string serverTimeStr = GetTime();
+      int64_t serverTimeMs = 0;
+      int64_t localTimeMs = static_cast<int64_t>(time(nullptr)) * 1000;
+      if (!serverTimeStr.empty())
+      {
+        try { serverTimeMs = std::stoll(serverTimeStr); }
+        catch (...) { serverTimeMs = localTimeMs; }
+      }
+      else
+      {
+        serverTimeMs = localTimeMs;
+      }
+      int64_t serverTimeOffsetMs = serverTimeMs - localTimeMs;
+      kodi::Log(ADDON_LOG_DEBUG,
+                "Server time offset: %lldms (server=%lld local=%lld)",
+                static_cast<long long>(serverTimeOffsetMs),
+                static_cast<long long>(serverTimeMs),
+                static_cast<long long>(localTimeMs));
+
+      StreamParams sp;
+      sp.publishingPoint = channel.publishingPoints[0].publishingPoint;
+      sp.streamingProfile = streaming_profile;
+      sp.serviceProvider = m_service_provider;
+      sp.streamUser = m_settings->GetEonStreamUser();
+      sp.streamKey = m_settings->GetEonStreamKey();
+      sp.serverIp = currentServer.ip;
+      sp.serverHostname = currentServer.hostname;
+      sp.deviceNumber = m_settings->GetEonDeviceNumber();
+      sp.sig = channel.sig;
+      sp.sessionId = m_session_id;
+      sp.aaEnabled = channel.aaEnabled;
+      sp.platform = m_platform;
+      sp.maxBitrate = rndbitrate;
+      sp.serverTimeOffsetMs = serverTimeOffsetMs;
+
+      m_redirectProxy.Stop();
+      m_redirectProxy.SetStreamParams(sp);
+      if (m_redirectProxy.Start())
+      {
+        std::string catchup_url = "http://127.0.0.1:" +
+                                  std::to_string(m_redirectProxy.GetPort()) +
+                                  "/stream?t={utc}";
+        properties.emplace_back("inputstream.ffmpegdirect.catchup_url_format_string", catchup_url);
+        properties.emplace_back("inputstream.ffmpegdirect.default_url", enc_url);
+        kodi::Log(ADDON_LOG_DEBUG, "Catchup URL via local proxy: %s", catchup_url.c_str());
+      }
+      else
+      {
+        kodi::Log(ADDON_LOG_ERROR, "Failed to start redirect proxy, seeking won't work");
+      }
+    }
 
     for (auto& prop : properties)
         kodi::Log(ADDON_LOG_DEBUG, "Name: %s Value: %s", prop.GetName().c_str(), prop.GetValue().c_str());
@@ -1165,6 +1249,33 @@ PVR_ERROR CPVREon::GetChannelStreamProperties(
   EonChannel addonChannel;
   if (GetChannel(channel, addonChannel)) {
     if (addonChannel.subscribed) {
+      // Track current live playback for GetStreamTimes()
+      m_stream_is_live = true;
+      m_stream_channel_id = addonChannel.iUniqueId;
+      m_stream_start_time = 0;
+      m_stream_end_time = 0;
+
+      // Fetch current EPG programme to get start/end times for progress bar
+      time_t now = time(nullptr);
+      std::string epgUrl = m_api + "v1/events/epg" +
+                           "?cid=" + std::to_string(addonChannel.iUniqueId) +
+                           "&fromTime=" + std::to_string(now) + "000" +
+                           "&toTime=" + std::to_string(now + 1) + "000";
+      rapidjson::Document epgDoc;
+      if (GetPostJson(epgUrl, "", epgDoc))
+      {
+        std::string cid = std::to_string(addonChannel.iUniqueId);
+        if (epgDoc.HasMember(cid.c_str()) && epgDoc[cid.c_str()].IsArray()
+            && epgDoc[cid.c_str()].Size() > 0)
+        {
+          const rapidjson::Value& epgItem = epgDoc[cid.c_str()][0];
+          m_stream_start_time = (time_t)(Utils::JsonInt64OrZero(epgItem, "startTime") / 1000);
+          m_stream_end_time = (time_t)(Utils::JsonInt64OrZero(epgItem, "endTime") / 1000);
+          kodi::Log(ADDON_LOG_DEBUG, "Live EPG: start=%lld end=%lld",
+                    (long long)m_stream_start_time, (long long)m_stream_end_time);
+        }
+      }
+
       return GetStreamProperties(addonChannel, properties, 0,/* 0,*/ true);
     }
     kodi::Log(ADDON_LOG_DEBUG, "Channel not subscribed");
@@ -1234,6 +1345,61 @@ PVR_ERROR CPVREon::GetSignalStatus(int channelUid, kodi::addon::PVRSignalStatus&
 {
   signalStatus.SetAdapterName("pvr eon backend");
   signalStatus.SetAdapterStatus("OK");
+
+  return PVR_ERROR_NO_ERROR;
+}
+
+PVR_ERROR CPVREon::GetStreamTimes(kodi::addon::PVRStreamTimes& times)
+{
+  // PTS values are in microseconds
+  static const int64_t PTS_PER_SECOND = 1000000;
+
+  if (m_stream_is_live)
+  {
+    // For live TV: show progress within a timeshift-like window.
+    // startTime = current wall-clock reference, ptsEnd grows as time passes.
+    // If we don't have EPG times, use a 2-hour default window from "now".
+    time_t now = time(nullptr);
+
+    if (m_stream_start_time > 0 && m_stream_end_time > m_stream_start_time)
+    {
+      // We have EPG programme bounds
+      times.SetStartTime(m_stream_start_time);
+      times.SetPTSStart(0);
+      times.SetPTSBegin(0);
+      int64_t duration = static_cast<int64_t>(now - m_stream_start_time);
+      if (duration < 0)
+        duration = 0;
+      times.SetPTSEnd(duration * PTS_PER_SECOND);
+      kodi::Log(ADDON_LOG_DEBUG, "GetStreamTimes LIVE: start=%lld now=%lld elapsed=%lld",
+                (long long)m_stream_start_time, (long long)now, (long long)duration);
+    }
+    else
+    {
+      // No EPG info yet - provide a basic window so progress bar appears
+      times.SetStartTime(now);
+      times.SetPTSStart(0);
+      times.SetPTSBegin(0);
+      times.SetPTSEnd(0);
+    }
+  }
+  else
+  {
+    // For replay/catchup: fixed programme duration
+    if (m_stream_start_time == 0 || m_stream_end_time == 0)
+      return PVR_ERROR_NOT_IMPLEMENTED;
+
+    int64_t duration = static_cast<int64_t>(m_stream_end_time - m_stream_start_time);
+    if (duration <= 0)
+      return PVR_ERROR_NOT_IMPLEMENTED;
+
+    times.SetStartTime(m_stream_start_time);
+    times.SetPTSStart(0);
+    times.SetPTSBegin(0);
+    times.SetPTSEnd(duration * PTS_PER_SECOND);
+    kodi::Log(ADDON_LOG_DEBUG, "GetStreamTimes REPLAY: start=%lld end=%lld duration=%lld sec",
+              (long long)m_stream_start_time, (long long)m_stream_end_time, (long long)duration);
+  }
 
   return PVR_ERROR_NO_ERROR;
 }
