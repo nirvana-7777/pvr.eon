@@ -9,6 +9,29 @@
 #include "../SHA256.h"
 #include "../Base64.h"
 #include <kodi/gui/dialogs/OK.h>
+#include <algorithm>
+
+namespace
+{
+const char* BoolState(bool value)
+{
+  return value ? "true" : "false";
+}
+
+std::string DescribeSecret(const std::string& value)
+{
+  return value.empty() ? "empty" : "set(len=" + std::to_string(value.size()) + ")";
+}
+
+std::string PreviewForLog(std::string value)
+{
+  std::replace(value.begin(), value.end(), '\n', ' ');
+  std::replace(value.begin(), value.end(), '\r', ' ');
+  if (value.size() > 200)
+    value = value.substr(0, 200) + "...";
+  return value;
+}
+} // namespace
 
 void HttpClient::SetApi(const std::string& api)
 {
@@ -41,19 +64,21 @@ bool HttpClient::RefreshGenericToken()
 
   rapidjson::Document doc;
   doc.Parse(content_auth.c_str());
-  if (doc.GetParseError())
+  std::string access_token = Utils::JsonStringOrEmpty(doc, "access_token");
+  if (doc.GetParseError() || statusCode != 200 || access_token.empty())
   {
-    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh generic access token");
+    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh generic access token. status=%i token=%s responseLen=%zu preview=%s",
+              statusCode, DescribeSecret(access_token).c_str(),
+              content_auth.size(), PreviewForLog(content_auth).c_str());
     return false;
   }
-
-  std::string access_token = Utils::JsonStringOrEmpty(doc, "access_token");
 
   if (!access_token.empty()) {
     m_settings->SetSetting("genericaccesstoken", access_token);
   }
 
-  kodi::Log(ADDON_LOG_DEBUG, "Got Generic Access Token: %s", access_token.c_str());
+  kodi::Log(ADDON_LOG_INFO, "Generic access token refresh succeeded. token=%s",
+            DescribeSecret(access_token).c_str());
 
   return true;
 }
@@ -70,11 +95,14 @@ bool HttpClient::RefreshSSToken()
   std::string postData = "{\"domainId\":\"" + SS_DOMAIN +
                            "\",\"applicationId\":\"vpb\""
                            ",\"grantType\":\"";
+  std::string grant_flow;
 
   if (!refresh_token.empty()) {
+    grant_flow = "refresh";
     postData = postData + "refresh\"" +
                           ",\"refreshToken\":\"" + refresh_token + "\"}";
   } else if (!username.empty() && !password.empty()) {
+    grant_flow = "password";
     postData = postData + "password\"" +
                           ",\"password\":\"" + password +  //TODO: Fix Password: Salted AES encrypted hash - Passphrase is SS_PASS
                           "\",\"username\":\"" + username + "\"}";
@@ -94,17 +122,25 @@ bool HttpClient::RefreshSSToken()
 
   rapidjson::Document doc;
   doc.Parse(ss_auth.c_str());
-  if (doc.GetParseError())
+  std::string ss_identity;
+  if (!doc.GetParseError() && doc.IsObject() && doc.HasMember("UserTokenAuthenticate"))
   {
-    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh self service token");
+    const rapidjson::Value& credentials = doc["UserTokenAuthenticate"];
+    ss_identity = Utils::JsonStringOrEmpty(credentials, "identity");
+    access_token = Utils::JsonStringOrEmpty(credentials, "accessToken");
+    refresh_token = Utils::JsonStringOrEmpty(credentials, "refreshToken");
+  }
+  if (doc.GetParseError() || statusCode != 200 || access_token.empty())
+  {
+    kodi::Log(ADDON_LOG_ERROR,
+              "Failed to refresh self service token. flow=%s status=%i identity=%s access=%s refresh=%s responseLen=%zu preview=%s",
+              grant_flow.c_str(), statusCode,
+              DescribeSecret(ss_identity).c_str(),
+              DescribeSecret(access_token).c_str(),
+              DescribeSecret(refresh_token).c_str(),
+              ss_auth.size(), PreviewForLog(ss_auth).c_str());
     return false;
   }
-
-  const rapidjson::Value& credentials = doc["UserTokenAuthenticate"];
-
-  std::string ss_identity = Utils::JsonStringOrEmpty(credentials, "identity");
-  access_token = Utils::JsonStringOrEmpty(credentials, "accessToken");
-  refresh_token = Utils::JsonStringOrEmpty(credentials, "refreshToken");
 
   if (!refresh_token.empty()) {
     m_settings->SetSetting("ssrefreshtoken", refresh_token);
@@ -115,7 +151,12 @@ bool HttpClient::RefreshSSToken()
   if (!ss_identity.empty()) {
     m_settings->SetSetting("ssidentity", ss_identity);
   }
-  kodi::Log(ADDON_LOG_DEBUG, "Got Identity: %s, Access Token: %s, Refresh Token: %s", ss_identity.c_str(), access_token.c_str(), refresh_token.c_str());
+  kodi::Log(ADDON_LOG_INFO,
+            "Self service token refresh succeeded. flow=%s identity=%s access=%s refresh=%s",
+            grant_flow.c_str(),
+            DescribeSecret(ss_identity).c_str(),
+            DescribeSecret(access_token).c_str(),
+            DescribeSecret(refresh_token).c_str());
 
   return true;
 }
@@ -127,24 +168,29 @@ bool HttpClient::RefreshToken()
   std::string url = m_api + "oauth/token?grant_type=";
   std::string refresh_token = m_settings->GetEonRefreshToken();
   std::string postData = "{}";
+  std::string grant_flow;
 
   if (!refresh_token.empty()) {
+    grant_flow = "refresh_token";
     url += "refresh_token&refresh_token=" + refresh_token;
   }
   else if ((!m_settings->GetEonUsername().empty()) && (!m_settings->GetEonPassword().empty()) && (!m_settings->GetEonDeviceNumber().empty()) && (m_settings->GetPlatform() != 1)) {
+    grant_flow = "password_device_number";
     SHA256 sha;
     sha.update(m_settings->GetEonUsername());
     uint8_t * digest = sha.digest();
     std::string user_hash = SHA256::toString(digest);
     std::transform(user_hash.begin(), user_hash.end(), user_hash.begin(), ::toupper);
-    kodi::Log(ADDON_LOG_DEBUG, "SHA256 %s", user_hash.c_str());
 
     delete[] digest;
 
     std::string password = m_settings->GetEonPassword();
     std::string device_number = m_settings->GetEonDeviceNumber();
 
-    kodi::Log(ADDON_LOG_DEBUG, "Using Device Number %s to login", device_number.c_str());
+    kodi::Log(ADDON_LOG_DEBUG,
+              "Refreshing main token using password flow. deviceNumber=%s username=%s",
+              DescribeSecret(device_number).c_str(),
+              DescribeSecret(m_settings->GetEonUsername()).c_str());
 
     std::string boundary = "----WebKitFormBoundary2VHeBtQPpnSo3SjK";
     curl_auth.AddHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
@@ -160,6 +206,7 @@ bool HttpClient::RefreshToken()
     //Try to login with OTP
     std::string generic_access_token = m_settings->GetGenericAccessToken();
     if ((m_settings->GetPlatform() == 1) && (!generic_access_token.empty()) && (!m_settings->GetEonDeviceNumber().empty())) {
+      grant_flow = "otp";
       Curl curl_otp;
       int statusCode_otp;
       std::string url_otp = m_api + "v1/otp?deviceNumber=" + m_settings->GetEonDeviceNumber();
@@ -170,7 +217,8 @@ bool HttpClient::RefreshToken()
       doc.Parse(otp_response.c_str());
       if (doc.GetParseError())
       {
-        kodi::Log(ADDON_LOG_ERROR, "Failed to get OTP");
+        kodi::Log(ADDON_LOG_ERROR, "Failed to get OTP. status=%i responseLen=%zu preview=%s",
+                  statusCode_otp, otp_response.size(), PreviewForLog(otp_response).c_str());
         return false;
       }
       std::string otp = Utils::JsonStringOrEmpty(doc, "otp");
@@ -180,7 +228,14 @@ bool HttpClient::RefreshToken()
       url += "otp&otp=" + otp + "&device_number=" + m_settings->GetEonDeviceNumber();
     } else {
       kodi::gui::dialogs::OK::ShowAndGetInput("PVR EON: " + kodi::addon::GetLocalizedString(30054), kodi::addon::GetLocalizedString(30055));
-      kodi::Log(ADDON_LOG_ERROR, "Failed to refresh token");
+      kodi::Log(ADDON_LOG_ERROR,
+                "Failed to refresh token. platform=%i username=%s password=%s refresh=%s generic=%s deviceNumber=%s",
+                m_settings->GetPlatform(),
+                DescribeSecret(m_settings->GetEonUsername()).c_str(),
+                DescribeSecret(m_settings->GetEonPassword()).c_str(),
+                DescribeSecret(m_settings->GetEonRefreshToken()).c_str(),
+                DescribeSecret(m_settings->GetGenericAccessToken()).c_str(),
+                DescribeSecret(m_settings->GetEonDeviceNumber()).c_str());
       return false;
     }
   }
@@ -194,16 +249,25 @@ bool HttpClient::RefreshToken()
 
   rapidjson::Document doc;
   doc.Parse(content_auth.c_str());
-  if (doc.GetParseError())
-  {
-    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh token");
-    return false;
-  }
-
   std::string access_token = Utils::JsonStringOrEmpty(doc, "access_token");
   refresh_token = Utils::JsonStringOrEmpty(doc, "refresh_token");
   std::string stream_key = Utils::JsonStringOrEmpty(doc, "stream_key");
   std::string stream_un = Utils::JsonStringOrEmpty(doc, "stream_un");
+
+  if (doc.GetParseError() || statusCode != 200 || access_token.empty())
+  {
+    kodi::Log(ADDON_LOG_ERROR,
+              "Failed to refresh token. flow=%s status=%i access=%s refresh=%s streamKey=%s streamUser=%s responseLen=%zu preview=%s",
+              grant_flow.c_str(),
+              statusCode,
+              DescribeSecret(access_token).c_str(),
+              DescribeSecret(refresh_token).c_str(),
+              DescribeSecret(stream_key).c_str(),
+              DescribeSecret(stream_un).c_str(),
+              content_auth.size(),
+              PreviewForLog(content_auth).c_str());
+    return false;
+  }
 
   m_settings->SetSetting("accesstoken", access_token);
   if (!refresh_token.empty()) {
@@ -215,6 +279,14 @@ bool HttpClient::RefreshToken()
   if (!stream_un.empty()) {
     m_settings->SetSetting("streamuser", stream_un);
   }
+
+  kodi::Log(ADDON_LOG_INFO,
+            "Main token refresh succeeded. flow=%s access=%s refresh=%s streamKey=%s streamUser=%s",
+            grant_flow.c_str(),
+            DescribeSecret(access_token).c_str(),
+            DescribeSecret(refresh_token).c_str(),
+            DescribeSecret(stream_key).c_str(),
+            DescribeSecret(stream_un).c_str());
 
   return true;
 }
@@ -314,6 +386,7 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
 {
   Curl curl;
   std::string access_token;
+  std::string auth_mode;
 
   curl.AddHeader("User-Agent", EON_USER_AGENT);
 
@@ -322,14 +395,19 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
     access_token = m_settings->GetSSAccessToken();
     if (!access_token.empty()) {
       curl.AddHeader("accesstoken", access_token);
+      auth_mode = "ss-access-token";
     }
     std::string basic_token = SS_USER + ":" + SS_SECRET;
     curl.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
+    if (auth_mode.empty())
+      auth_mode = "ss-basic";
   } else {
     if (url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos) {
       access_token = m_settings->GetGenericAccessToken();
+      auth_mode = access_token.empty() ? "generic-basic" : "generic-bearer";
     } else {
       access_token = m_settings->GetEonAccessToken();
+      auth_mode = access_token.empty() ? "main-basic" : "main-bearer";
     }
     if (!access_token.empty()) {
       curl.AddHeader("Authorization", "bearer " + access_token);
@@ -348,28 +426,40 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
   std::string content = HttpRequestToCurl(curl, action, url, postData, statusCode);
 
   if (statusCode == 401) {
+    kodi::Log(ADDON_LOG_INFO,
+              "HTTP 401 for %s %s. auth=%s payloadLen=%zu, attempting token refresh.",
+              action.c_str(), url.c_str(), auth_mode.c_str(), postData.size());
     Curl curl_reauth;
     size_t found = url.find(m_supportApi);
     bool refresh_successful = true;
+    std::string retry_auth_mode;
     if (found != std::string::npos) {
       if (RefreshSSToken()) {
         access_token = m_settings->GetSSAccessToken();
         curl_reauth.AddHeader("accesstoken", access_token);
         std::string basic_token = SS_USER + ":" + SS_SECRET;
         curl_reauth.AddHeader("Authorization", "Basic " + base64_encode(basic_token.c_str(), basic_token.length()));
+        retry_auth_mode = "ss-access-token";
+      } else {
+        refresh_successful = false;
       }
     } else {
       if (url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos) {
         refresh_successful = RefreshGenericToken();
         access_token = m_settings->GetGenericAccessToken();
+        retry_auth_mode = "generic-bearer";
       } else {
         refresh_successful = RefreshToken();
         access_token = m_settings->GetEonAccessToken();
+        retry_auth_mode = "main-bearer";
       }
-      curl_reauth.AddHeader("Authorization", "bearer " + access_token);
+      if (refresh_successful && !access_token.empty())
+        curl_reauth.AddHeader("Authorization", "bearer " + access_token);
     }
     if (refresh_successful) {
       content = HttpRequestToCurl(curl_reauth, action, url, postData, statusCode);
+      kodi::Log(ADDON_LOG_INFO, "HTTP retry after refresh completed. auth=%s status=%i responseLen=%zu",
+                retry_auth_mode.c_str(), statusCode, content.size());
     } else {
       std::string refresh_token = m_settings->GetEonRefreshToken();
       if (!refresh_token.empty() && !(url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos)) {
@@ -377,20 +467,24 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
         m_settings->SetSetting("refreshtoken", "");
         refresh_successful = RefreshToken();
         access_token = m_settings->GetEonAccessToken();
-        curl_reauth.AddHeader("Authorization", "bearer " + access_token);
+        if (!access_token.empty())
+          curl_reauth.AddHeader("Authorization", "bearer " + access_token);
         if (refresh_successful) {
           content = HttpRequestToCurl(curl_reauth, action, url, postData, statusCode);
+          kodi::Log(ADDON_LOG_INFO, "HTTP retry after last-resort refresh completed. status=%i responseLen=%zu",
+                    statusCode, content.size());
         }
       }
     }
   }
 
   if (statusCode >= 400 || statusCode < 200) {
-    kodi::Log(ADDON_LOG_ERROR, "Open URL failed with %i.", statusCode);
+    kodi::Log(ADDON_LOG_ERROR, "Open URL failed with %i. method=%s url=%s auth=%s responseLen=%zu preview=%s",
+              statusCode, action.c_str(), url.c_str(), auth_mode.c_str(), content.size(),
+              PreviewForLog(content).c_str());
     if (m_statusCodeHandler != nullptr) {
       m_statusCodeHandler->ErrorStatusCode(statusCode);
     }
-    return "";
   }
 
   return content;

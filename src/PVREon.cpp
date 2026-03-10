@@ -10,7 +10,13 @@
 #include "Globals.h"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <thread>
 
+#include <kodi/Filesystem.h>
 #include <kodi/General.h>
 #include <kodi/gui/dialogs/OK.h>
 #include "Utils.h"
@@ -25,6 +31,177 @@
 #include "pkcs7_padding.hpp"
 
 static const uint8_t block_size = 16;
+
+namespace
+{
+constexpr int64_t PVR_TIME_BASE = 1000000;
+constexpr time_t PENDING_PLAYBACK_TTL_SECONDS = 15;
+constexpr int64_t NATIVE_VIRTUAL_UNITS_PER_SECOND = 1000;
+constexpr time_t NATIVE_SEEK_RESTART_EPSILON_SECONDS = 2;
+constexpr int NATIVE_POLL_RETRY_COUNT = 10;
+constexpr auto NATIVE_POLL_RETRY_DELAY = std::chrono::milliseconds(200);
+
+int64_t MonotonicNowMs()
+{
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+const char* BoolState(bool value)
+{
+  return value ? "true" : "false";
+}
+
+const char* PlatformName(int platform)
+{
+  switch (platform)
+  {
+    case PLATFORM_WEB:
+      return "web";
+    case PLATFORM_ANDROIDTV:
+      return "androidtv";
+    default:
+      return "unknown";
+  }
+}
+
+const char* InputstreamName(int inputstream)
+{
+  switch (inputstream)
+  {
+    case INPUTSTREAM_ADAPTIVE:
+      return "inputstream.adaptive";
+    case INPUTSTREAM_FFMPEGDIRECT:
+      return "inputstream.ffmpegdirect";
+    default:
+      return "unknown";
+  }
+}
+
+std::string DescribeValue(const std::string& value)
+{
+  return value.empty() ? "empty" : "set(len=" + std::to_string(value.size()) + ")";
+}
+
+std::string PreviewForLog(std::string value)
+{
+  std::replace(value.begin(), value.end(), '\n', ' ');
+  std::replace(value.begin(), value.end(), '\r', ' ');
+  if (value.size() > 200)
+    value = value.substr(0, 200) + "...";
+  return value;
+}
+
+size_t CountOccurrences(const std::string& haystack, const std::string& needle)
+{
+  if (needle.empty())
+    return 0;
+
+  size_t count = 0;
+  size_t pos = 0;
+  while ((pos = haystack.find(needle, pos)) != std::string::npos)
+  {
+    ++count;
+    pos += needle.size();
+  }
+  return count;
+}
+
+std::string Trim(std::string value)
+{
+  while (!value.empty() && (value.back() == '\r' || value.back() == '\n' || value.back() == ' ' || value.back() == '\t'))
+    value.pop_back();
+
+  size_t start = 0;
+  while (start < value.size() && (value[start] == ' ' || value[start] == '\t'))
+    ++start;
+
+  return value.substr(start);
+}
+
+std::string ResolvePlaylistUrl(const std::string& baseUrl, const std::string& childUrl)
+{
+  if (childUrl.empty())
+    return "";
+
+  if (childUrl.rfind("https://", 0) == 0 || childUrl.rfind("http://", 0) == 0)
+    return childUrl;
+
+  const size_t schemePos = baseUrl.find("://");
+  if (schemePos == std::string::npos)
+    return childUrl;
+
+  const std::string scheme = baseUrl.substr(0, schemePos);
+  const size_t authorityStart = schemePos + 3;
+  const size_t pathStart = baseUrl.find('/', authorityStart);
+  const std::string authority = pathStart == std::string::npos
+                                    ? baseUrl.substr(authorityStart)
+                                    : baseUrl.substr(authorityStart, pathStart - authorityStart);
+
+  if (childUrl.rfind("//", 0) == 0)
+    return scheme + ":" + childUrl;
+
+  if (childUrl.front() == '/')
+    return scheme + "://" + authority + childUrl;
+
+  const size_t lastSlash = baseUrl.rfind('/');
+  if (lastSlash == std::string::npos || lastSlash < authorityStart)
+    return scheme + "://" + authority + "/" + childUrl;
+
+  return baseUrl.substr(0, lastSlash + 1) + childUrl;
+}
+
+std::string FirstVariantPlaylistUrl(const std::string& manifestBody, const std::string& baseUrl)
+{
+  size_t pos = 0;
+  while (pos < manifestBody.size())
+  {
+    const size_t lineEnd = manifestBody.find('\n', pos);
+    const std::string line = Trim(manifestBody.substr(pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos));
+    pos = lineEnd == std::string::npos ? manifestBody.size() : lineEnd + 1;
+
+    if (line.rfind("#EXT-X-STREAM-INF", 0) != 0)
+      continue;
+
+    while (pos < manifestBody.size())
+    {
+      const size_t uriEnd = manifestBody.find('\n', pos);
+      const std::string uri = Trim(manifestBody.substr(pos, uriEnd == std::string::npos ? std::string::npos : uriEnd - pos));
+      pos = uriEnd == std::string::npos ? manifestBody.size() : uriEnd + 1;
+      if (uri.empty() || uri[0] == '#')
+        continue;
+
+      return ResolvePlaylistUrl(baseUrl, uri);
+    }
+  }
+
+  return "";
+}
+
+std::vector<std::string> ExtractMediaSegmentUrls(const std::string& playlistBody,
+                                                 const std::string& baseUrl)
+{
+  std::vector<std::string> urls;
+
+  size_t pos = 0;
+  while (pos < playlistBody.size())
+  {
+    const size_t lineEnd = playlistBody.find('\n', pos);
+    const std::string line =
+        Trim(playlistBody.substr(pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos));
+    pos = lineEnd == std::string::npos ? playlistBody.size() : lineEnd + 1;
+
+    if (line.empty() || line[0] == '#')
+      continue;
+
+    urls.emplace_back(ResolvePlaylistUrl(baseUrl, line));
+  }
+
+  return urls;
+}
+
+} // namespace
 
 /***********************************************************
   * PVR Client AddOn specific public library functions
@@ -144,10 +321,13 @@ bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapid
   doc.Parse(result.c_str());
   if ((doc.GetParseError()) || (statusCode != 200 && statusCode != 206))
   {
-    kodi::Log(ADDON_LOG_ERROR, "Failed to get JSON for URL %s and body %s. Status code: %i", url.c_str(), body.c_str(), statusCode);
+    kodi::Log(ADDON_LOG_ERROR,
+              "Failed to get JSON for URL %s. requestBodyLen=%zu responseLen=%zu parseError=%u status=%i",
+              url.c_str(), body.size(), result.size(), doc.GetParseError(), statusCode);
+    if (!result.empty())
+      kodi::Log(ADDON_LOG_DEBUG, "JSON failure response preview: %s", PreviewForLog(result).c_str());
     if (!doc.GetParseError())
     {
-      kodi::Log(ADDON_LOG_ERROR, "Result is: %s", result.c_str());
       if (doc.HasMember("error") && doc.HasMember("errorMessage"))
       {
         std::string title = Utils::JsonStringOrEmpty(doc, "error");
@@ -340,6 +520,44 @@ bool CPVREon::GetDeviceFromSerial()
   return true;
 }
 
+bool CPVREon::RefreshDeviceRegistration()
+{
+  kodi::Log(ADDON_LOG_INFO, "Refreshing stored device registration.");
+
+  m_settings->SetSetting("accesstoken", "");
+  m_settings->SetSetting("refreshtoken", "");
+  m_settings->SetSetting("subscriberid", "");
+  m_settings->SetSetting("streamkey", "");
+  m_settings->SetSetting("streamuser", "");
+  m_settings->SetSetting("deviceid", "");
+  m_settings->SetSetting("devicenumber", "");
+
+  m_device_id.clear();
+  m_device_number.clear();
+  m_subscriber_id.clear();
+
+  m_device_serial = m_settings->GetEonDeviceSerial();
+  if (m_device_serial.empty())
+  {
+    m_device_serial = m_httpClient->GetUUID();
+    m_settings->SetSetting("deviceserial", m_device_serial);
+    kodi::Log(ADDON_LOG_DEBUG, "Generated replacement device serial: %s", m_device_serial.c_str());
+  }
+
+  if (!GetDeviceFromSerial())
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh stored device registration.");
+    return false;
+  }
+
+  m_settings->SetSetting("deviceid", m_device_id);
+  m_settings->SetSetting("devicenumber", m_device_number);
+  kodi::Log(ADDON_LOG_INFO, "Device registration refreshed. deviceId=%s deviceNumber=%s",
+            DescribeValue(m_device_id).c_str(),
+            DescribeValue(m_device_number).c_str());
+  return true;
+}
+
 bool CPVREon::GetServers()
 {
   std::string url = m_api + "v1/servers";
@@ -509,7 +727,7 @@ bool CPVREon::GetCategories(const bool isRadio)
 CPVREon::CPVREon() :
   m_settings(new CSettings())
 {
-  m_settings->Load();
+  const bool settings_loaded = m_settings->Load();
   m_httpClient = new HttpClient(m_settings);
 
   m_platform = m_settings->GetPlatform();
@@ -517,6 +735,31 @@ CPVREon::CPVREon() :
   m_httpClient->SetSupportApi(m_support_web);
 
   srand(time(nullptr));
+
+  kodi::Log(ADDON_LOG_INFO,
+            "Starting pvr.eon. platform=%s provider=%i tv=%s radio=%s groups=%s hideUnsubscribed=%s shortNames=%s ageRating=%i inputstream=%i settingsLoaded=%s settingsValid=%s",
+            PlatformName(m_platform),
+            m_settings->GetEonServiceProvider(),
+            BoolState(m_settings->IsTVenabled()),
+            BoolState(m_settings->IsRadioenabled()),
+            BoolState(m_settings->IsGroupsenabled()),
+            BoolState(m_settings->HideUnsubscribed()),
+            BoolState(m_settings->UseShortNames()),
+            m_settings->GetAgeRating(),
+            m_settings->GetInputstream(),
+            BoolState(settings_loaded),
+            BoolState(m_settings->VerifySettings()));
+  kodi::Log(ADDON_LOG_DEBUG,
+            "Startup settings state. username=%s password=%s access=%s refresh=%s generic=%s deviceId=%s deviceNumber=%s deviceSerial=%s subscriberId=%s",
+            DescribeValue(m_settings->GetEonUsername()).c_str(),
+            DescribeValue(m_settings->GetEonPassword()).c_str(),
+            DescribeValue(m_settings->GetEonAccessToken()).c_str(),
+            DescribeValue(m_settings->GetEonRefreshToken()).c_str(),
+            DescribeValue(m_settings->GetGenericAccessToken()).c_str(),
+            DescribeValue(m_settings->GetEonDeviceID()).c_str(),
+            DescribeValue(m_settings->GetEonDeviceNumber()).c_str(),
+            DescribeValue(m_settings->GetEonDeviceSerial()).c_str(),
+            DescribeValue(m_settings->GetEonSubscriberID()).c_str());
 
   if (GetCDNInfo()) {
     std::string cdn_identifier = GetBrandIdentifier();
@@ -533,6 +776,11 @@ CPVREon::CPVREon() :
 
   m_device_id = m_settings->GetEonDeviceID();
   m_device_number = m_settings->GetEonDeviceNumber();
+  m_device_serial = m_settings->GetEonDeviceSerial();
+  kodi::Log(ADDON_LOG_DEBUG, "Stored device state before init. deviceId=%s deviceNumber=%s deviceSerial=%s",
+            DescribeValue(m_device_id).c_str(),
+            DescribeValue(m_device_number).c_str(),
+            DescribeValue(m_device_serial).c_str());
 /*
   m_ss_identity = m_settings->GetSSIdentity();
   if (m_ss_identity.empty()) {
@@ -548,7 +796,6 @@ CPVREon::CPVREon() :
       m_settings->SetSetting("deviceserial", m_device_serial);
     }
 */
-    m_device_serial = m_settings->GetEonDeviceSerial();
     if (m_device_serial.empty()) {
       m_device_serial = m_httpClient->GetUUID();
       m_settings->SetSetting("deviceserial", m_device_serial);
@@ -558,37 +805,88 @@ CPVREon::CPVREon() :
       m_settings->SetSetting("deviceid", m_device_id);
       m_settings->SetSetting("devicenumber", m_device_number);
     }
+  } else {
+    kodi::Log(ADDON_LOG_INFO, "Using stored device registration. deviceId=%s deviceNumber=%s",
+              DescribeValue(m_device_id).c_str(),
+              DescribeValue(m_device_number).c_str());
   }
 
   bool allgood = true;
+  bool retried_with_fresh_device = false;
 
   m_subscriber_id = m_settings->GetEonSubscriberID();
   if (m_subscriber_id.empty()) {
-    if (GetHouseholds()) {
+    const bool households_ok = GetHouseholds();
+    kodi::Log(ADDON_LOG_INFO, "Startup step GetHouseholds=%s subscriberId=%s",
+              BoolState(households_ok), DescribeValue(m_subscriber_id).c_str());
+    if (households_ok) {
       m_settings->SetSetting("subscriberid", m_subscriber_id);
+    } else if (m_platform == PLATFORM_WEB && !m_device_number.empty()) {
+      kodi::Log(ADDON_LOG_INFO, "Retrying startup after refreshing stored web device registration.");
+      retried_with_fresh_device = RefreshDeviceRegistration();
+      if (retried_with_fresh_device && GetHouseholds()) {
+        kodi::Log(ADDON_LOG_INFO, "Startup retry GetHouseholds=true subscriberId=%s",
+                  DescribeValue(m_subscriber_id).c_str());
+        m_settings->SetSetting("subscriberid", m_subscriber_id);
+      } else {
+        allgood = false;
+      }
     } else {
       allgood = false;
     }
+  } else {
+    kodi::Log(ADDON_LOG_INFO, "Using stored subscriber ID. subscriberId=%s",
+              DescribeValue(m_subscriber_id).c_str());
   }
 
   if (m_service_provider.empty() || m_support_web.empty()) {
     allgood = GetServiceProvider();
+    kodi::Log(ADDON_LOG_INFO, "Startup step GetServiceProvider=%s serviceProvider=%s supportApi=%s",
+              BoolState(allgood), DescribeValue(m_service_provider).c_str(),
+              DescribeValue(m_support_web).c_str());
+    if (!allgood && m_platform == PLATFORM_WEB && !retried_with_fresh_device && !m_device_number.empty()) {
+      kodi::Log(ADDON_LOG_INFO, "Retrying service provider lookup after refreshing stored web device registration.");
+      retried_with_fresh_device = RefreshDeviceRegistration();
+      if (retried_with_fresh_device)
+      {
+        allgood = GetServiceProvider();
+        kodi::Log(ADDON_LOG_INFO, "Startup retry GetServiceProvider=%s serviceProvider=%s supportApi=%s",
+                  BoolState(allgood), DescribeValue(m_service_provider).c_str(),
+                  DescribeValue(m_support_web).c_str());
+      }
+    }
   }
 
   if (allgood) {
     allgood = GetRenderingProfiles();
+    kodi::Log(ADDON_LOG_INFO, "Startup step GetRenderingProfiles=%s totalProfiles=%zu",
+              BoolState(allgood), m_rendering_profiles.size());
   }
   if (allgood) {
     allgood = GetServers();
+    kodi::Log(ADDON_LOG_INFO, "Startup step GetServers=%s liveServers=%zu timeshiftServers=%zu",
+              BoolState(allgood), m_live_servers.size(), m_timeshift_servers.size());
   }
   if (m_settings->IsTVenabled() && (allgood)) {
     allgood = GetCategories(false);
+    kodi::Log(ADDON_LOG_INFO, "Startup step GetCategories(TV)=%s totalCategories=%zu",
+              BoolState(allgood), m_categories.size());
     allgood = LoadChannels(false);
   }
   if (m_settings->IsRadioenabled() && (allgood)) {
     allgood = GetCategories(true);
+    kodi::Log(ADDON_LOG_INFO, "Startup step GetCategories(Radio)=%s totalCategories=%zu",
+              BoolState(allgood), m_categories.size());
     allgood = LoadChannels(true);
   }
+
+  const size_t tv_channels = std::count_if(m_channels.begin(), m_channels.end(),
+                                           [](const EonChannel& channel) { return !channel.bRadio; });
+  const size_t radio_channels = std::count_if(m_channels.begin(), m_channels.end(),
+                                              [](const EonChannel& channel) { return channel.bRadio; });
+  kodi::Log(ADDON_LOG_INFO,
+            "Startup finished. allgood=%s totalChannels=%zu tvChannels=%zu radioChannels=%zu categories=%zu",
+            BoolState(allgood), m_channels.size(), tv_channels, radio_channels, m_categories.size());
 }
 
 CPVREon::~CPVREon()
@@ -607,7 +905,7 @@ ADDON_STATUS CPVREon::SetSetting(const std::string& settingName, const std::stri
 
 bool CPVREon::LoadChannels(const bool isRadio)
 {
-  kodi::Log(ADDON_LOG_DEBUG, "Load Eon Channels");
+  kodi::Log(ADDON_LOG_DEBUG, "Load Eon Channels. type=%s", isRadio ? "radio" : "tv");
 
   std::string url = m_api + "v3/channels?channelType=" + (isRadio ? "RADIO&channelSort=RECOMMENDED&sortDir=DESC" : "TV");
 
@@ -621,10 +919,15 @@ bool CPVREon::LoadChannels(const bool isRadio)
   int startnumber = m_settings->GetStartNum()-1;
   int lastnumber = startnumber;
   const rapidjson::Value& channels = doc;
+  size_t total_channels = 0;
+  size_t added_channels = 0;
+  size_t unsubscribed_skipped = 0;
+  size_t archive_channels = 0;
 
   for (rapidjson::Value::ConstValueIterator itr1 = channels.Begin();
       itr1 != channels.End(); ++itr1)
   {
+    ++total_channels;
     const rapidjson::Value& channelItem = (*itr1);
 
     std::string channame;
@@ -638,6 +941,8 @@ bool CPVREon::LoadChannels(const bool isRadio)
 
     eon_channel.bRadio = isRadio;
     eon_channel.bArchive = Utils::JsonBoolOrFalse(channelItem, "cutvEnabled");
+    if (eon_channel.bArchive)
+      ++archive_channels;
     eon_channel.strChannelName = channame;
     int ref_id = Utils::JsonIntOrZero(channelItem, "id");
 
@@ -717,8 +1022,20 @@ bool CPVREon::LoadChannels(const bool isRadio)
     if (!m_settings->HideUnsubscribed() || eon_channel.subscribed) {
       kodi::Log(ADDON_LOG_DEBUG, "%i. Channel Name: %s ID: %i Sig: %s", lastnumber, channame.c_str(), ref_id, eon_channel.sig.c_str());
       m_channels.emplace_back(eon_channel);
+      ++added_channels;
+    } else {
+      ++unsubscribed_skipped;
     }
   }
+
+  kodi::Log(ADDON_LOG_INFO,
+            "LoadChannels summary. type=%s total=%zu added=%zu skippedUnsubscribed=%zu archiveEnabled=%zu totalStored=%zu",
+            isRadio ? "radio" : "tv",
+            total_channels,
+            added_channels,
+            unsubscribed_skipped,
+            archive_channels,
+            m_channels.size());
 
   return true;
 }
@@ -763,11 +1080,21 @@ bool CPVREon::HandleSession(bool start, int cid, int epg_id)
 }
 
 void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,
-                                    const std::string& url,
-                                    const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive/*,
-                                    time_t starttime, time_t endtime*/)
+                                  const std::string& url,
+                                  const bool& realtime,
+                                  const bool& playTimeshiftBuffer,
+                                  const bool& isLive,
+                                  time_t starttime,
+                                  time_t endtime)
 {
-  kodi::Log(ADDON_LOG_DEBUG, "[PLAY STREAM] url: %s", url.c_str());
+  kodi::Log(ADDON_LOG_DEBUG,
+            "[PLAY STREAM] url=%s realtime=%s playTimeshiftBuffer=%s mode=%s start=%lld end=%lld",
+            url.c_str(),
+            BoolState(realtime),
+            BoolState(playTimeshiftBuffer),
+            isLive ? "live" : "replay",
+            static_cast<long long>(starttime),
+            static_cast<long long>(endtime));
 
   properties.emplace_back(PVR_STREAM_PROPERTY_STREAMURL, url);
   properties.emplace_back(PVR_STREAM_PROPERTY_ISREALTIMESTREAM, realtime ? "true" : "false");
@@ -802,20 +1129,550 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
     kodi::Log(ADDON_LOG_DEBUG, "...using inputstream.ffmpegdirect");
     properties.emplace_back(PVR_STREAM_PROPERTY_INPUTSTREAM, "inputstream.ffmpegdirect");
     properties.emplace_back("inputstream.ffmpegdirect.manifest_type", "hls");
-    properties.emplace_back("inputstream.ffmpegdirect.is_realtime_stream", "true");
-    properties.emplace_back("inputstream.ffmpegdirect.stream_mode", isLive ? "timeshift" : "catchup");
-/*
-    if (!isLive) {
-      properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_start_time", std::to_string(starttime));
-      properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_end_time", std::to_string(endtime));
-      properties.emplace_back("inputstream.ffmpegdirect.programme_start_time", std::to_string(starttime));
-      properties.emplace_back("inputstream.ffmpegdirect.programme_end_time", std::to_string(endtime));
+    properties.emplace_back("inputstream.ffmpegdirect.is_realtime_stream", realtime ? "true" : "false");
+    if (isLive)
+    {
+      properties.emplace_back("inputstream.ffmpegdirect.stream_mode", "timeshift");
     }
-*/
+    else
+    {
+      properties.emplace_back("inputstream.ffmpegdirect.open_mode", "ffmpeg");
+      properties.emplace_back("inputstream.ffmpegdirect.playback_as_live", "false");
+      kodi::Log(ADDON_LOG_INFO,
+                "Using simplified ffmpegdirect replay mode. start=%lld end=%lld",
+                static_cast<long long>(starttime),
+                static_cast<long long>(endtime));
+    }
   } else {
     kodi::Log(ADDON_LOG_DEBUG, "Unknown inputstream detected");
   }
   properties.emplace_back(PVR_STREAM_PROPERTY_MIMETYPE, "application/x-mpegURL");
+
+  if (!isLive)
+  {
+    kodi::Log(ADDON_LOG_INFO,
+              "Replay properties prepared. inputstream=%s realtime=%s start=%lld end=%lld urlLen=%zu",
+              InputstreamName(inputstream),
+              BoolState(realtime),
+              static_cast<long long>(starttime),
+              static_cast<long long>(endtime),
+              url.size());
+  }
+}
+
+bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
+                               time_t starttime,
+                               time_t endtime,
+                               const bool& isLive,
+                               EonPlaybackUrlResult& result,
+                               const bool includeDiagnostics)
+{
+  result = {};
+
+  if (channel.publishingPoints.empty())
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Channel uid=%i has no publishing points", channel.iUniqueId);
+    return false;
+  }
+
+  std::string streaming_profile = "hp7000";
+
+  unsigned int rndbitrate = 0;
+  unsigned int current_bitrate = 0;
+  unsigned int current_id = 0;
+  for (unsigned int i = 0; i < channel.publishingPoints[0].profileIds.size(); i++)
+  {
+    current_bitrate = getBitrate(channel.bRadio, channel.publishingPoints[0].profileIds[i]);
+    kodi::Log(ADDON_LOG_DEBUG, "Bitrate is: %u for profile id: %u", current_bitrate,
+              channel.publishingPoints[0].profileIds[i]);
+    if (current_bitrate > rndbitrate)
+    {
+      current_id = channel.publishingPoints[0].profileIds[i];
+      rndbitrate = current_bitrate;
+    }
+  }
+
+  if (current_id == 0)
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Failed to resolve rendering profile for channel uid=%i",
+              channel.iUniqueId);
+    return false;
+  }
+
+  streaming_profile = getCoreStreamId(current_id);
+  result.streamProfile = streaming_profile;
+  result.bitrate = static_cast<int>(rndbitrate);
+  kodi::Log(ADDON_LOG_DEBUG, "Channel Rendering Profile -> %u", current_id);
+
+  m_session_id = Utils::CreateUUID();
+
+  EonServer currentServer;
+  if (!GetServer(isLive, currentServer))
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Failed to select %s server for channel uid=%i",
+              isLive ? "live" : "timeshift", channel.iUniqueId);
+    return false;
+  }
+
+  std::string plain_aes;
+  const bool use_adaptive_stream_hint =
+      isLive || m_settings->GetInputstream() == INPUTSTREAM_ADAPTIVE;
+
+  if (m_platform == PLATFORM_ANDROIDTV)
+  {
+    plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
+                "stream=" + streaming_profile + ";" + "sp=" + m_service_provider + ";" +
+                "u=" + m_settings->GetEonStreamUser() + ";" + "m=" + currentServer.ip + ";" +
+                "device=" + m_settings->GetEonDeviceNumber() + ";" + "ctime=" + GetTime() + ";" +
+                "lang=eng;player=" + PLAYER + ";" +
+                "aa=" + (channel.aaEnabled ? "true" : "false") + ";" +
+                "conn=" + CONN_TYPE_ETHERNET + ";" + "minvbr=100;" +
+                "ss=" + m_settings->GetEonStreamKey() + ";" + "session=" + m_session_id + ";" +
+                "maxvbr=" + std::to_string(rndbitrate);
+    if (!isLive)
+      plain_aes = plain_aes + ";t=" + std::to_string(static_cast<int>(starttime)) + "000;";
+  }
+  else
+  {
+    plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
+                "stream=" + streaming_profile + ";" + "sp=" + m_service_provider + ";" +
+                "u=" + m_settings->GetEonStreamUser() + ";" +
+                "ss=" + m_settings->GetEonStreamKey() + ";" + "minvbr=100;" +
+                "sig=" + channel.sig + ";" + "session=" + m_session_id + ";" +
+                "m=" + currentServer.ip + ";" + "device=" + m_settings->GetEonDeviceNumber() +
+                ";" + "ctime=" + GetTime() + ";" + "conn=" + CONN_TYPE_BROWSER + ";";
+    if (use_adaptive_stream_hint)
+      plain_aes = plain_aes + "adaptive=true;";
+    plain_aes = plain_aes + "player=" + PLAYER + ";";
+    if (!isLive)
+      plain_aes = plain_aes + "t=" + std::to_string(static_cast<int>(starttime)) + "000;";
+    plain_aes = plain_aes + "aa=" + (channel.aaEnabled ? "true" : "false");
+  }
+
+  if (!isLive)
+  {
+    kodi::Log(ADDON_LOG_INFO,
+              "Replay URL payload prepared. inputstream=%s adaptiveHint=%s start=%lld end=%lld",
+              InputstreamName(m_settings->GetInputstream()),
+              BoolState(use_adaptive_stream_hint),
+              static_cast<long long>(starttime),
+              static_cast<long long>(endtime));
+  }
+
+  std::string key = base64_decode(urlsafedecode(m_settings->GetEonStreamKey()));
+
+  std::ostringstream convert;
+  for (int i = 0; i < block_size; i++)
+    convert << static_cast<uint8_t>(rand());
+  std::string iv_str = convert.str();
+
+  std::string enc_str = aes_encrypt_cbc(iv_str, key, plain_aes);
+
+  kodi::Log(ADDON_LOG_DEBUG, "IV -> %s", string_to_hex(iv_str).c_str());
+  kodi::Log(ADDON_LOG_DEBUG, "IV (base64) -> %s",
+            urlsafeencode(base64_encode(iv_str.c_str(), iv_str.length())).c_str());
+  kodi::Log(ADDON_LOG_DEBUG, "Encrypted -> %s", string_to_hex(enc_str).c_str());
+  kodi::Log(ADDON_LOG_DEBUG, "Encrypted (base64) -> %s",
+            urlsafeencode(base64_encode(enc_str.c_str(), enc_str.length())).c_str());
+
+  result.url = "https://" + currentServer.hostname +
+               "/stream?i=" + urlsafeencode(base64_encode(iv_str.c_str(), iv_str.length())) +
+               "&a=" + urlsafeencode(base64_encode(enc_str.c_str(), enc_str.length()));
+  if (m_platform == PLATFORM_ANDROIDTV)
+    result.url = result.url + "&lang=eng";
+  result.url = result.url + "&sp=" + m_service_provider + "&u=" + m_settings->GetEonStreamUser() +
+               "&player=" + PLAYER + "&session=" + m_session_id;
+  if (m_platform != PLATFORM_ANDROIDTV)
+    result.url = result.url + "&sig=" + channel.sig;
+
+  kodi::Log(ADDON_LOG_DEBUG, "Encrypted Stream URL -> %s", result.url.c_str());
+
+  if (includeDiagnostics && !isLive)
+  {
+    Curl manifestCurl;
+    manifestCurl.AddHeader("User-Agent", EonParameters[m_platform].user_agent);
+    int manifestStatus = 0;
+    const std::string manifestBody = manifestCurl.Get(result.url, manifestStatus);
+    kodi::Log(ADDON_LOG_INFO,
+              "Replay manifest fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
+              manifestStatus, manifestBody.size(), CountOccurrences(manifestBody, "#EXTINF"),
+              BoolState(manifestBody.find("#EXT-X-ENDLIST") != std::string::npos),
+              BoolState(manifestBody.find("#EXT-X-PLAYLIST-TYPE:VOD") != std::string::npos),
+              BoolState(manifestBody.find("#EXT-X-PLAYLIST-TYPE:EVENT") != std::string::npos),
+              PreviewForLog(manifestBody).c_str());
+
+    const std::string variantUrl = FirstVariantPlaylistUrl(manifestBody, result.url);
+    if (!variantUrl.empty())
+    {
+      int variantStatus = 0;
+      const std::string variantBody = manifestCurl.Get(variantUrl, variantStatus);
+      kodi::Log(ADDON_LOG_INFO,
+                "Replay variant fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
+                variantStatus, variantBody.size(), CountOccurrences(variantBody, "#EXTINF"),
+                BoolState(variantBody.find("#EXT-X-ENDLIST") != std::string::npos),
+                BoolState(variantBody.find("#EXT-X-PLAYLIST-TYPE:VOD") != std::string::npos),
+                BoolState(variantBody.find("#EXT-X-PLAYLIST-TYPE:EVENT") != std::string::npos),
+                PreviewForLog(variantBody).c_str());
+    }
+  }
+
+  return true;
+}
+
+bool CPVREon::UseExperimentalNativeStream() const
+{
+  return m_settings->UseExperimentalNativeStream() && m_platform == PLATFORM_WEB;
+}
+
+bool CPVREon::OpenNativeStream(const EonChannel& channel,
+                               bool isLive,
+                               time_t starttime,
+                               time_t endtime)
+{
+  CloseNativeStreamInternal();
+
+  EonPlaybackUrlResult playback;
+  if (!BuildPlaybackUrl(channel, starttime, endtime, isLive, playback, false))
+    return false;
+
+  m_nativeStream.open = true;
+  m_nativeStream.isLive = isLive;
+  m_nativeStream.seekable = !isLive;
+  m_nativeStream.channel = channel;
+  m_nativeStream.programmeStartTime = isLive ? time(nullptr) : starttime;
+  m_nativeStream.programmeEndTime = isLive ? 0 : endtime;
+  m_nativeStream.sessionStartTime = isLive ? time(nullptr) : starttime;
+  m_nativeStream.sessionAnchorMonotonicMs = MonotonicNowMs();
+  m_nativeStream.masterUrl = playback.url;
+  m_nativeStream.bitrate = playback.bitrate;
+  m_nativeStream.virtualUnitsPerSecond = NATIVE_VIRTUAL_UNITS_PER_SECOND;
+
+  if (!isLive)
+  {
+    const int64_t duration =
+        std::max<int64_t>(m_nativeStream.programmeEndTime - m_nativeStream.programmeStartTime, 1);
+    m_nativeStream.virtualLength = duration * m_nativeStream.virtualUnitsPerSecond;
+    m_nativeStream.currentPosition = TimeToStreamPosition(starttime);
+  }
+
+  kodi::Log(ADDON_LOG_INFO,
+            "Opening native %s stream. channel=%s uid=%i start=%lld end=%lld bitrate=%i unitsPerSecond=%lld",
+            isLive ? "live" : "archive",
+            channel.strChannelName.c_str(),
+            channel.iUniqueId,
+            static_cast<long long>(starttime),
+            static_cast<long long>(endtime),
+            playback.bitrate,
+            static_cast<long long>(m_nativeStream.virtualUnitsPerSecond));
+
+  if (!UpdateNativeVariantUrl(true) || !LoadNextNativeFragment())
+  {
+    CloseNativeStreamInternal();
+    return false;
+  }
+
+  return true;
+}
+
+void CPVREon::CloseNativeStreamInternal()
+{
+  if (m_nativeStream.open)
+  {
+    const int64_t visiblePosition =
+        m_nativeStream.isLive ? 0 : GetCurrentNativePosition();
+    kodi::Log(ADDON_LOG_INFO,
+              "Closing native stream. live=%s currentPosition=%lld queuedFragments=%zu",
+              BoolState(m_nativeStream.isLive),
+              static_cast<long long>(visiblePosition),
+              m_nativeStream.pendingFragments.size());
+  }
+
+  m_nativeStream = {};
+}
+
+bool CPVREon::RestartNativeStreamAt(time_t starttime)
+{
+  if (!m_nativeStream.open || m_nativeStream.isLive)
+    return false;
+
+  if (m_nativeStream.programmeEndTime <= m_nativeStream.programmeStartTime)
+    return false;
+
+  const time_t clampedStart =
+      std::clamp(starttime, m_nativeStream.programmeStartTime, m_nativeStream.programmeEndTime - 1);
+  const time_t currentPlaybackTime = StreamPositionToTime(GetCurrentNativePosition());
+  long long restartDelta =
+      static_cast<long long>(clampedStart) - static_cast<long long>(currentPlaybackTime);
+  if (restartDelta < 0)
+    restartDelta = -restartDelta;
+  if (restartDelta <= static_cast<long long>(NATIVE_SEEK_RESTART_EPSILON_SECONDS))
+  {
+    m_nativeStream.currentPosition = TimeToStreamPosition(clampedStart);
+    kodi::Log(ADDON_LOG_DEBUG,
+              "Skipping native archive restart. currentTime=%lld targetTime=%lld delta=%lld",
+              static_cast<long long>(currentPlaybackTime),
+              static_cast<long long>(clampedStart),
+              restartDelta);
+    return true;
+  }
+
+  EonPlaybackUrlResult playback;
+  if (!BuildPlaybackUrl(m_nativeStream.channel, clampedStart, m_nativeStream.programmeEndTime,
+                        false, playback, false))
+  {
+    return false;
+  }
+
+  m_nativeStream.sessionStartTime = clampedStart;
+  m_nativeStream.masterUrl = playback.url;
+  m_nativeStream.variantUrl.clear();
+  m_nativeStream.pendingFragments.clear();
+  m_nativeStream.lastFragmentUrl.clear();
+  m_nativeStream.currentFragmentData.clear();
+  m_nativeStream.currentFragmentOffset = 0;
+  m_nativeStream.sessionAnchorMonotonicMs = MonotonicNowMs();
+  m_nativeStream.bitrate = playback.bitrate;
+  m_nativeStream.currentPosition = TimeToStreamPosition(clampedStart);
+
+  kodi::Log(ADDON_LOG_INFO,
+            "Restarting native archive stream. channel=%s uid=%i targetTime=%lld position=%lld",
+            m_nativeStream.channel.strChannelName.c_str(),
+            m_nativeStream.channel.iUniqueId,
+            static_cast<long long>(clampedStart),
+            static_cast<long long>(m_nativeStream.currentPosition));
+
+  return UpdateNativeVariantUrl(true) && LoadNextNativeFragment();
+}
+
+bool CPVREon::UpdateNativeVariantUrl(bool logErrors)
+{
+  if (!m_nativeStream.open || m_nativeStream.masterUrl.empty())
+    return false;
+
+  Curl manifestCurl;
+  manifestCurl.AddHeader("User-Agent", EonParameters[m_platform].user_agent);
+  int manifestStatus = 0;
+  const std::string manifestBody = manifestCurl.Get(m_nativeStream.masterUrl, manifestStatus);
+  if (manifestStatus != 200 && manifestStatus != 206)
+  {
+    if (logErrors)
+    {
+      kodi::Log(ADDON_LOG_ERROR, "Native stream manifest request failed. status=%i url=%s",
+                manifestStatus, m_nativeStream.masterUrl.c_str());
+    }
+    return false;
+  }
+
+  std::string variantUrl = FirstVariantPlaylistUrl(manifestBody, m_nativeStream.masterUrl);
+  if (variantUrl.empty())
+    variantUrl = m_nativeStream.masterUrl;
+
+  m_nativeStream.variantUrl = variantUrl;
+  kodi::Log(ADDON_LOG_INFO, "Native stream variant selected. url=%s",
+            m_nativeStream.variantUrl.c_str());
+  return true;
+}
+
+bool CPVREon::PollNativeFragmentQueue(bool forceRefresh)
+{
+  if (!m_nativeStream.open)
+    return false;
+
+  if (!forceRefresh && !m_nativeStream.pendingFragments.empty())
+    return true;
+
+  if (m_nativeStream.variantUrl.empty() && !UpdateNativeVariantUrl(true))
+    return false;
+
+  Curl playlistCurl;
+  playlistCurl.AddHeader("User-Agent", EonParameters[m_platform].user_agent);
+  int playlistStatus = 0;
+  const std::string playlistBody = playlistCurl.Get(m_nativeStream.variantUrl, playlistStatus);
+  if (playlistStatus != 200 && playlistStatus != 206)
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Native playlist request failed. status=%i url=%s", playlistStatus,
+              m_nativeStream.variantUrl.c_str());
+    return false;
+  }
+
+  if (CountOccurrences(playlistBody, "#EXTINF") == 0 &&
+      playlistBody.find("#EXT-X-STREAM-INF") != std::string::npos)
+  {
+    const std::string nestedVariant = FirstVariantPlaylistUrl(playlistBody, m_nativeStream.variantUrl);
+    if (!nestedVariant.empty() && nestedVariant != m_nativeStream.variantUrl)
+    {
+      m_nativeStream.variantUrl = nestedVariant;
+      return PollNativeFragmentQueue(true);
+    }
+  }
+
+  const std::vector<std::string> fragmentUrls =
+      ExtractMediaSegmentUrls(playlistBody, m_nativeStream.variantUrl);
+  if (fragmentUrls.empty())
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Native playlist contained no fragments. url=%s preview=%s",
+              m_nativeStream.variantUrl.c_str(), PreviewForLog(playlistBody).c_str());
+    return false;
+  }
+
+  size_t startIndex = 0;
+  if (!m_nativeStream.lastFragmentUrl.empty())
+  {
+    const auto lastIt =
+        std::find(fragmentUrls.begin(), fragmentUrls.end(), m_nativeStream.lastFragmentUrl);
+    if (lastIt != fragmentUrls.end())
+      startIndex = static_cast<size_t>(std::distance(fragmentUrls.begin(), lastIt) + 1);
+  }
+
+  size_t added = 0;
+  for (size_t i = startIndex; i < fragmentUrls.size(); ++i)
+  {
+    if (std::find(m_nativeStream.pendingFragments.begin(), m_nativeStream.pendingFragments.end(),
+                  fragmentUrls[i]) != m_nativeStream.pendingFragments.end())
+    {
+      continue;
+    }
+
+    m_nativeStream.pendingFragments.push_back(fragmentUrls[i]);
+    ++added;
+  }
+
+  kodi::Log(ADDON_LOG_DEBUG,
+            "Native playlist poll. fragments=%zu added=%zu queued=%zu last=%s preview=%s",
+            fragmentUrls.size(),
+            added,
+            m_nativeStream.pendingFragments.size(),
+            m_nativeStream.lastFragmentUrl.empty() ? "<none>" : m_nativeStream.lastFragmentUrl.c_str(),
+            PreviewForLog(playlistBody).c_str());
+
+  return !m_nativeStream.pendingFragments.empty();
+}
+
+bool CPVREon::LoadNextNativeFragment()
+{
+  m_nativeStream.currentFragmentData.clear();
+  m_nativeStream.currentFragmentOffset = 0;
+
+  for (int attempt = 0; attempt < NATIVE_POLL_RETRY_COUNT; ++attempt)
+  {
+    if (!m_nativeStream.pendingFragments.empty())
+      break;
+
+    if (PollNativeFragmentQueue(true))
+      break;
+
+    std::this_thread::sleep_for(NATIVE_POLL_RETRY_DELAY);
+  }
+
+  while (!m_nativeStream.pendingFragments.empty())
+  {
+    const std::string fragmentUrl = m_nativeStream.pendingFragments.front();
+    m_nativeStream.pendingFragments.pop_front();
+
+    std::vector<uint8_t> data;
+    int statusCode = 0;
+    if (!FetchBinaryUrl(fragmentUrl, data, statusCode) || data.empty())
+    {
+      kodi::Log(ADDON_LOG_ERROR,
+                "Failed to fetch native fragment. status=%i bytes=%zu url=%s",
+                statusCode,
+                data.size(),
+                fragmentUrl.c_str());
+      continue;
+    }
+
+    m_nativeStream.lastFragmentUrl = fragmentUrl;
+    m_nativeStream.currentFragmentData = std::move(data);
+    kodi::Log(ADDON_LOG_DEBUG, "Loaded native fragment. bytes=%zu url=%s",
+              m_nativeStream.currentFragmentData.size(), fragmentUrl.c_str());
+    return true;
+  }
+
+  return false;
+}
+
+bool CPVREon::FetchBinaryUrl(const std::string& url, std::vector<uint8_t>& data, int& statusCode)
+{
+  data.clear();
+  statusCode = -1;
+
+  kodi::vfs::CFile file;
+  if (!file.CURLCreate(url))
+  {
+    kodi::Log(ADDON_LOG_ERROR, "CURLCreate failed for native fragment %s", url.c_str());
+    return false;
+  }
+
+  file.CURLAddOption(ADDON_CURL_OPTION_HEADER, "User-Agent", EonParameters[m_platform].user_agent);
+  file.CURLAddOption(ADDON_CURL_OPTION_PROTOCOL, "failonerror", "false");
+  if (!file.CURLOpen(ADDON_READ_NO_CACHE))
+  {
+    kodi::Log(ADDON_LOG_ERROR, "CURLOpen failed for native fragment %s", url.c_str());
+    return false;
+  }
+
+  const std::string proto = file.GetPropertyValue(ADDON_FILE_PROPERTY_RESPONSE_PROTOCOL, "");
+  const std::string::size_type posResponseCode = proto.find(' ');
+  if (posResponseCode != std::string::npos)
+    statusCode = atoi(proto.c_str() + (posResponseCode + 1));
+
+  std::array<uint8_t, 32768> buffer{};
+  ssize_t bytesRead = 0;
+  while ((bytesRead = file.Read(buffer.data(), buffer.size())) > 0)
+  {
+    data.insert(data.end(), buffer.begin(), buffer.begin() + bytesRead);
+  }
+
+  return statusCode == 200 || statusCode == 206;
+}
+
+int64_t CPVREon::GetCurrentNativePosition() const
+{
+  if (!m_nativeStream.open || m_nativeStream.isLive || m_nativeStream.virtualLength <= 0)
+    return 0;
+
+  const int64_t basePosition = TimeToStreamPosition(m_nativeStream.sessionStartTime);
+  if (m_nativeStream.sessionAnchorMonotonicMs <= 0 || m_nativeStream.virtualUnitsPerSecond <= 0)
+  {
+    return std::clamp<int64_t>(std::max(m_nativeStream.currentPosition, basePosition), 0,
+                               m_nativeStream.virtualLength);
+  }
+
+  const int64_t elapsedMs =
+      std::max<int64_t>(MonotonicNowMs() - m_nativeStream.sessionAnchorMonotonicMs, 0);
+  const int64_t elapsedUnits =
+      (elapsedMs * m_nativeStream.virtualUnitsPerSecond) / 1000;
+  return std::clamp<int64_t>(
+      std::max(m_nativeStream.currentPosition, basePosition + elapsedUnits), 0,
+      m_nativeStream.virtualLength);
+}
+
+time_t CPVREon::StreamPositionToTime(int64_t position) const
+{
+  if (!m_nativeStream.open || m_nativeStream.isLive || m_nativeStream.virtualLength <= 0 ||
+      m_nativeStream.virtualUnitsPerSecond <= 0)
+  {
+    return m_nativeStream.sessionStartTime;
+  }
+
+  const int64_t clampedPosition = std::clamp<int64_t>(position, 0, m_nativeStream.virtualLength);
+  const int64_t offsetSeconds = clampedPosition / m_nativeStream.virtualUnitsPerSecond;
+  return m_nativeStream.programmeStartTime + offsetSeconds;
+}
+
+int64_t CPVREon::TimeToStreamPosition(time_t timeValue) const
+{
+  if (!m_nativeStream.open || m_nativeStream.isLive || m_nativeStream.virtualLength <= 0 ||
+      m_nativeStream.virtualUnitsPerSecond <= 0)
+  {
+    return 0;
+  }
+
+  const time_t clampedTime =
+      std::clamp(timeValue, m_nativeStream.programmeStartTime, m_nativeStream.programmeEndTime);
+  const int64_t offsetSeconds = clampedTime - m_nativeStream.programmeStartTime;
+  return std::clamp<int64_t>(offsetSeconds * m_nativeStream.virtualUnitsPerSecond, 0,
+                             m_nativeStream.virtualLength);
 }
 
 PVR_ERROR CPVREon::GetCapabilities(kodi::addon::PVRCapabilities& capabilities)
@@ -832,6 +1689,7 @@ PVR_ERROR CPVREon::GetCapabilities(kodi::addon::PVRCapabilities& capabilities)
   capabilities.SetSupportsRecordingsLifetimeChange(false);
   capabilities.SetSupportsDescrambleInfo(false);
   capabilities.SetSupportsProviders(false);
+  capabilities.SetHandlesInputStream(UseExperimentalNativeStream());
 
   return PVR_ERROR_NO_ERROR;
 }
@@ -986,12 +1844,34 @@ PVR_ERROR CPVREon::IsEPGTagPlayable(const kodi::addon::PVREPGTag& tag, bool& bIs
 PVR_ERROR CPVREon::GetEPGTagStreamProperties(
     const kodi::addon::PVREPGTag& tag, std::vector<kodi::addon::PVRStreamProperty>& properties)
 {
-  kodi::Log(ADDON_LOG_DEBUG, "function call: [%s]", __FUNCTION__);
+  kodi::Log(ADDON_LOG_INFO,
+            "function call: [%s] channelUid=%u start=%lld end=%lld",
+            __FUNCTION__,
+            tag.GetUniqueChannelId(),
+            static_cast<long long>(tag.GetStartTime()),
+            static_cast<long long>(tag.GetEndTime()));
   for (const auto& channel : m_channels)
   {
     if (channel.iUniqueId == tag.GetUniqueChannelId())
     {
-      return GetStreamProperties(channel, properties, tag.GetStartTime(), /*tag.GetEndTime(),*/ false);
+      if (UseExperimentalNativeStream())
+      {
+        m_pendingPlayback.active = true;
+        m_pendingPlayback.channelUid = channel.iUniqueId;
+        m_pendingPlayback.startTime = tag.GetStartTime();
+        m_pendingPlayback.endTime = tag.GetEndTime();
+        m_pendingPlayback.requestTime = time(nullptr);
+        properties.emplace_back(PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE, "true");
+        kodi::Log(ADDON_LOG_INFO,
+                  "Queued archive playback for native stream mode. channel=%s uid=%i start=%lld end=%lld",
+                  channel.strChannelName.c_str(),
+                  channel.iUniqueId,
+                  static_cast<long long>(m_pendingPlayback.startTime),
+                  static_cast<long long>(m_pendingPlayback.endTime));
+        return PVR_ERROR_NO_ERROR;
+      }
+
+      return GetStreamProperties(channel, properties, tag.GetStartTime(), tag.GetEndTime(), false);
     }
   }
   return PVR_ERROR_NO_ERROR;
@@ -1048,109 +1928,25 @@ PVR_ERROR CPVREon::GetChannels(bool bRadio, kodi::addon::PVRChannelsResultSet& r
 }
 
 PVR_ERROR CPVREon::GetStreamProperties(
-    const EonChannel& channel, std::vector<kodi::addon::PVRStreamProperty>& properties, time_t starttime,/* time_t endtime,*/ const bool& isLive)
+    const EonChannel& channel,
+    std::vector<kodi::addon::PVRStreamProperty>& properties,
+    time_t starttime,
+    time_t endtime,
+    const bool& isLive)
 {
-    kodi::Log(ADDON_LOG_DEBUG, "function call: [%s]", __FUNCTION__);
-    std::string streaming_profile = "hp7000";
+    kodi::Log(ADDON_LOG_DEBUG,
+              "function call: [%s] channel=%s uid=%i mode=%s start=%lld end=%lld",
+              __FUNCTION__,
+              channel.strChannelName.c_str(),
+              channel.iUniqueId,
+              isLive ? "live" : "replay",
+              static_cast<long long>(starttime),
+              static_cast<long long>(endtime));
+    EonPlaybackUrlResult playback;
+    if (!BuildPlaybackUrl(channel, starttime, endtime, isLive, playback, true))
+      return PVR_ERROR_SERVER_ERROR;
 
-    unsigned int rndbitrate = 0;
-    unsigned int current_bitrate = 0;
-    unsigned int current_id = 0;
-    for (unsigned int i = 0; i < channel.publishingPoints[0].profileIds.size(); i++) {
-        current_bitrate = getBitrate(channel.bRadio, channel.publishingPoints[0].profileIds[i]);
-        kodi::Log(ADDON_LOG_DEBUG, "Bitrate is: %u for profile id: %u", current_bitrate, channel.publishingPoints[0].profileIds[i]);
-        if (current_bitrate > rndbitrate) {
-          current_id = channel.publishingPoints[0].profileIds[i];
-          rndbitrate = current_bitrate;
-        }
-    }
-    if (current_id == 0) {
-      return PVR_ERROR_NO_ERROR;
-    } else {
-      streaming_profile = getCoreStreamId(current_id);
-    }
-    kodi::Log(ADDON_LOG_DEBUG, "Channel Rendering Profile -> %u", current_id);
-
-    m_session_id = Utils::CreateUUID();
-
-    EonServer currentServer;
-
-    GetServer(isLive, currentServer);
-
-    std::string plain_aes;
-
-    if (m_platform == PLATFORM_ANDROIDTV) {
-      plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
-                  "stream=" + streaming_profile + ";" +
-                  "sp=" + m_service_provider + ";" +
-                  "u=" + m_settings->GetEonStreamUser() + ";" +
-                  "m=" + currentServer.ip + ";" +
-                  "device=" + m_settings->GetEonDeviceNumber() + ";" +
-                  "ctime=" + GetTime() + ";" +
-//                  "lang=eng;minvbr=100;adaptive=true;player=" + PLAYER + ";" +
-                  "lang=eng;player=" + PLAYER + ";" +
-                  "aa=" + (channel.aaEnabled ? "true" : "false") + ";" +
-                  "conn=" + CONN_TYPE_ETHERNET + ";" +
-                  "minvbr=100;" +
-//                  "sig=" + channel.sig + ";" +
-                  "ss=" + m_settings->GetEonStreamKey() + ";" +
-                  "session=" + m_session_id + ";" +
-                  "maxvbr=" + std::to_string(rndbitrate);
-                  if (!isLive) {
-                    plain_aes = plain_aes + ";t=" + std::to_string((int) starttime) + "000;";
-                  }
-    } else {
-      plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
-                  "stream=" + streaming_profile + ";" + "sp=" + m_service_provider + ";" +
-                  "u=" + m_settings->GetEonStreamUser() + ";" +
-                  "ss=" + m_settings->GetEonStreamKey() + ";" +
-                  "minvbr=100;adaptive=true;player=" + PLAYER + ";" +
-                  "sig=" + channel.sig + ";" +
-                  "session=" + m_session_id + ";" +
-                  "m=" + currentServer.ip + ";" +
-                  "device=" + m_settings->GetEonDeviceNumber() + ";" +
-                  "ctime=" + GetTime() + ";" +
-                  "conn=" + CONN_TYPE_BROWSER + ";";
-                  if (!isLive) {
-                    plain_aes = plain_aes + "t=" + std::to_string((int) starttime) + "000;";
-                  }
-                  plain_aes = plain_aes + "aa=" + (channel.aaEnabled ? "true" : "false");
-    }
-//    kodi::Log(ADDON_LOG_DEBUG, "Plain AES -> %s", plain_aes.c_str());
-
-    std::string key = base64_decode(urlsafedecode(m_settings->GetEonStreamKey()));
-
-    std::ostringstream convert;
-    for (int i = 0; i < block_size; i++) {
-        convert << (uint8_t) rand();
-    }
-    std::string iv_str = convert.str();
-
-    std::string enc_str = aes_encrypt_cbc(iv_str, key, plain_aes);
-
-    kodi::Log(ADDON_LOG_DEBUG, "IV -> %s", string_to_hex(iv_str).c_str());
-    kodi::Log(ADDON_LOG_DEBUG, "IV (base64) -> %s", urlsafeencode(base64_encode(iv_str.c_str(), iv_str.length())).c_str());
-//    kodi::Log(ADDON_LOG_DEBUG, "Key -> %s", string_to_hex(key).c_str());
-    kodi::Log(ADDON_LOG_DEBUG, "Encrypted -> %s", string_to_hex(enc_str).c_str());
-    kodi::Log(ADDON_LOG_DEBUG, "Encrypted (base64) -> %s", urlsafeencode(base64_encode(enc_str.c_str(), enc_str.length())).c_str());
-
-    std::string enc_url = "https://" + currentServer.hostname +
-                          "/stream?i=" + urlsafeencode(base64_encode(iv_str.c_str(), iv_str.length())) +
-                          "&a=" + urlsafeencode(base64_encode(enc_str.c_str(), enc_str.length()));
-    if (m_platform == PLATFORM_ANDROIDTV) {
-      enc_url = enc_url + "&lang=eng";
-    }
-    enc_url = enc_url +   "&sp=" + m_service_provider +
-                          "&u=" + m_settings->GetEonStreamUser() +
-                          "&player=" + PLAYER +
-                          "&session=" + m_session_id;
-    if (m_platform != PLATFORM_ANDROIDTV) {
-      enc_url = enc_url + "&sig=" + channel.sig;
-    }
-
-    kodi::Log(ADDON_LOG_DEBUG, "Encrypted Stream URL -> %s", enc_url.c_str());
-
-    SetStreamProperties(properties, enc_url, true, false, isLive/*, starttime, endtime*/);
+    SetStreamProperties(properties, playback.url, isLive, false, isLive, starttime, endtime);
 
     for (auto& prop : properties)
         kodi::Log(ADDON_LOG_DEBUG, "Name: %s Value: %s", prop.GetName().c_str(), prop.GetValue().c_str());
@@ -1159,13 +1955,21 @@ PVR_ERROR CPVREon::GetStreamProperties(
 }
 
 PVR_ERROR CPVREon::GetChannelStreamProperties(
-    const kodi::addon::PVRChannel& channel, std::vector<kodi::addon::PVRStreamProperty>& properties)
+    const kodi::addon::PVRChannel& channel,
+    std::vector<kodi::addon::PVRStreamProperty>& properties)
 {
-  kodi::Log(ADDON_LOG_DEBUG, "function call: [%s]", __FUNCTION__);
+  kodi::Log(ADDON_LOG_DEBUG, "function call: [%s] channelUid=%u", __FUNCTION__,
+            channel.GetUniqueId());
+
+  if (UseExperimentalNativeStream())
+  {
+    return PVR_ERROR_NO_ERROR;
+  }
+
   EonChannel addonChannel;
   if (GetChannel(channel, addonChannel)) {
     if (addonChannel.subscribed) {
-      return GetStreamProperties(addonChannel, properties, 0,/* 0,*/ true);
+      return GetStreamProperties(addonChannel, properties, 0, 0, true);
     }
     kodi::Log(ADDON_LOG_DEBUG, "Channel not subscribed");
     return PVR_ERROR_SERVER_ERROR;
@@ -1252,6 +2056,144 @@ PVR_ERROR CPVREon::GetRecordingStreamProperties(
     const kodi::addon::PVRRecording& recording,
     std::vector<kodi::addon::PVRStreamProperty>& properties)
 {
+  return PVR_ERROR_NO_ERROR;
+}
+
+bool CPVREon::OpenLiveStream(const kodi::addon::PVRChannel& channel)
+{
+  if (!UseExperimentalNativeStream())
+    return false;
+
+  EonChannel addonChannel;
+  if (!GetChannel(channel, addonChannel) || !addonChannel.subscribed)
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Failed to resolve native stream channel uid=%u", channel.GetUniqueId());
+    return false;
+  }
+
+  const time_t now = time(nullptr);
+  const bool usePendingArchive =
+      m_pendingPlayback.active && m_pendingPlayback.channelUid == addonChannel.iUniqueId &&
+      now - m_pendingPlayback.requestTime <= PENDING_PLAYBACK_TTL_SECONDS;
+
+  const time_t archiveStart = usePendingArchive ? m_pendingPlayback.startTime : 0;
+  const time_t archiveEnd = usePendingArchive ? m_pendingPlayback.endTime : 0;
+
+  kodi::Log(ADDON_LOG_INFO,
+            "OpenLiveStream in native mode. channel=%s uid=%i mode=%s start=%lld end=%lld",
+            addonChannel.strChannelName.c_str(),
+            addonChannel.iUniqueId,
+            usePendingArchive ? "archive" : "live",
+            static_cast<long long>(archiveStart),
+            static_cast<long long>(archiveEnd));
+
+  m_pendingPlayback = {};
+  return OpenNativeStream(addonChannel, !usePendingArchive, archiveStart, archiveEnd);
+}
+
+void CPVREon::CloseLiveStream()
+{
+  if (UseExperimentalNativeStream())
+    CloseNativeStreamInternal();
+}
+
+int CPVREon::ReadLiveStream(unsigned char* buffer, unsigned int size)
+{
+  if (!UseExperimentalNativeStream() || !m_nativeStream.open)
+    return -1;
+
+  unsigned int written = 0;
+  while (written < size)
+  {
+    if (m_nativeStream.currentFragmentOffset >= m_nativeStream.currentFragmentData.size())
+    {
+      if (!LoadNextNativeFragment())
+        break;
+    }
+
+    const size_t remainingFragment =
+        m_nativeStream.currentFragmentData.size() - m_nativeStream.currentFragmentOffset;
+    const size_t toCopy = std::min<size_t>(size - written, remainingFragment);
+    memcpy(buffer + written,
+           m_nativeStream.currentFragmentData.data() + m_nativeStream.currentFragmentOffset,
+           toCopy);
+    m_nativeStream.currentFragmentOffset += toCopy;
+    written += static_cast<unsigned int>(toCopy);
+  }
+
+  if (!m_nativeStream.isLive)
+    m_nativeStream.currentPosition = GetCurrentNativePosition();
+
+  return static_cast<int>(written);
+}
+
+int64_t CPVREon::SeekLiveStream(int64_t position, int whence)
+{
+  if (!UseExperimentalNativeStream() || !m_nativeStream.open || !m_nativeStream.seekable)
+    return -1;
+
+  int64_t targetPosition = position;
+  if (whence == SEEK_CUR)
+    targetPosition = GetCurrentNativePosition() + position;
+  else if (whence == SEEK_END)
+    targetPosition = m_nativeStream.virtualLength + position;
+
+  targetPosition = std::clamp<int64_t>(targetPosition, 0, m_nativeStream.virtualLength);
+  const time_t targetTime = StreamPositionToTime(targetPosition);
+  if (!RestartNativeStreamAt(targetTime))
+    return -1;
+
+  m_nativeStream.currentPosition = TimeToStreamPosition(targetTime);
+  return m_nativeStream.currentPosition;
+}
+
+int64_t CPVREon::LengthLiveStream()
+{
+  if (!UseExperimentalNativeStream() || !m_nativeStream.open)
+    return 0;
+
+  return m_nativeStream.seekable ? m_nativeStream.virtualLength : 0;
+}
+
+bool CPVREon::CanPauseStream()
+{
+  return UseExperimentalNativeStream() && m_nativeStream.open && !m_nativeStream.isLive;
+}
+
+bool CPVREon::CanSeekStream()
+{
+  return UseExperimentalNativeStream() && m_nativeStream.open && m_nativeStream.seekable;
+}
+
+bool CPVREon::IsRealTimeStream()
+{
+  if (!UseExperimentalNativeStream())
+    return true;
+
+  return !m_nativeStream.open || m_nativeStream.isLive;
+}
+
+PVR_ERROR CPVREon::GetStreamTimes(kodi::addon::PVRStreamTimes& times)
+{
+  if (!UseExperimentalNativeStream() || !m_nativeStream.open)
+    return PVR_ERROR_NOT_IMPLEMENTED;
+
+  if (m_nativeStream.isLive)
+  {
+    times.SetStartTime(time(nullptr));
+    times.SetPTSStart(0);
+    times.SetPTSBegin(0);
+    times.SetPTSEnd(0);
+    return PVR_ERROR_NO_ERROR;
+  }
+
+  const int64_t duration =
+      std::max<int64_t>(m_nativeStream.programmeEndTime - m_nativeStream.programmeStartTime, 1);
+
+  times.SetStartTime(m_nativeStream.programmeStartTime);
+  times.SetPTSStart(0);
+  times.SetPTSBegin(0);
+  times.SetPTSEnd(duration * PVR_TIME_BASE);
   return PVR_ERROR_NO_ERROR;
 }
 

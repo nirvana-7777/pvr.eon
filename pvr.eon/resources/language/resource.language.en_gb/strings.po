@@ -232,6 +232,10 @@ msgctxt "#30056"
 msgid "Age Rating"
 msgstr ""
 
+msgctxt "#30057"
+msgid "Experimental native archive streaming"
+msgstr ""
+
 
 msgctxt "#30500"
 msgid "Inputstream error"

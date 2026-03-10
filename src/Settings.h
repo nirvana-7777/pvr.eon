@@ -42,6 +42,7 @@ public:
   const bool IsRadioenabled() const { return m_enableradio; }
   const bool IsGroupsenabled() const  { return m_enablegroups; }
   const bool UseShortNames() const  { return m_shortnames; }
+  const bool UseExperimentalNativeStream() const { return m_experimentalNativeStream; }
 
 private:
   int m_eonServiceProvider;
@@ -68,4 +69,5 @@ private:
   bool m_enableradio;
   bool m_enablegroups;
   bool m_shortnames;
+  bool m_experimentalNativeStream;
 };

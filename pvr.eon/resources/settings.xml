@@ -207,6 +207,11 @@
           </constraints>
           <control type="list" format="integer" />
         </setting>
+        <setting id="experimentalnativestream" type="boolean" label="30057">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle" />
+        </setting>
       </group>
     </category>
   </section>
