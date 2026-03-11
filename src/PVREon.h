@@ -111,9 +111,11 @@ struct EonCDN
 struct EonPendingPlayback
 {
   bool active = false;
+  bool liveEdge = false;
   int channelUid = 0;
   time_t startTime = 0;
   time_t endTime = 0;
+  time_t initialPlaybackTime = 0;
   time_t requestTime = 0;
 };
 
@@ -122,6 +124,7 @@ struct EonNativeStreamState
   bool open = false;
   bool isLive = true;
   bool seekable = false;
+  bool liveEdge = false;
   EonChannel channel;
   time_t programmeStartTime = 0;
   time_t programmeEndTime = 0;
@@ -221,7 +224,12 @@ private:
                         EonPlaybackUrlResult& result,
                         const bool includeDiagnostics = true);
   bool UseExperimentalNativeStream() const;
-  bool OpenNativeStream(const EonChannel& channel, bool isLive, time_t starttime, time_t endtime);
+  bool OpenNativeStream(const EonChannel& channel,
+                        bool isLive,
+                        time_t starttime,
+                        time_t endtime,
+                        time_t initialPlaybackTime = 0,
+                        bool liveEdge = false);
   void CloseNativeStreamInternal();
   bool RestartNativeStreamAt(time_t starttime);
   bool UpdateNativeVariantUrl(bool logErrors = true);
@@ -229,6 +237,7 @@ private:
   bool LoadNextNativeFragment();
   bool FetchBinaryUrl(const std::string& url, std::vector<uint8_t>& data, int& statusCode);
   int64_t GetCurrentNativePosition() const;
+  time_t GetCurrentNativeSeekableEndTime() const;
   time_t StreamPositionToTime(int64_t position) const;
   int64_t TimeToStreamPosition(time_t timeValue) const;
 

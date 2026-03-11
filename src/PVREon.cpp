@@ -38,6 +38,7 @@ constexpr int64_t PVR_TIME_BASE = 1000000;
 constexpr time_t PENDING_PLAYBACK_TTL_SECONDS = 15;
 constexpr int64_t NATIVE_VIRTUAL_UNITS_PER_SECOND = 1000;
 constexpr time_t NATIVE_SEEK_RESTART_EPSILON_SECONDS = 2;
+constexpr time_t NATIVE_LIVE_EDGE_DELAY_SECONDS = 15;
 constexpr int NATIVE_POLL_RETRY_COUNT = 10;
 constexpr auto NATIVE_POLL_RETRY_DELAY = std::chrono::milliseconds(200);
 
@@ -1327,21 +1328,29 @@ bool CPVREon::UseExperimentalNativeStream() const
 bool CPVREon::OpenNativeStream(const EonChannel& channel,
                                bool isLive,
                                time_t starttime,
-                               time_t endtime)
+                               time_t endtime,
+                               time_t initialPlaybackTime,
+                               bool liveEdge)
 {
   CloseNativeStreamInternal();
 
+  const time_t effectivePlaybackTime =
+      isLive ? time(nullptr)
+             : std::clamp(initialPlaybackTime > 0 ? initialPlaybackTime : starttime, starttime,
+                          std::max(starttime, endtime - 1));
+
   EonPlaybackUrlResult playback;
-  if (!BuildPlaybackUrl(channel, starttime, endtime, isLive, playback, false))
+  if (!BuildPlaybackUrl(channel, effectivePlaybackTime, endtime, isLive, playback, false))
     return false;
 
   m_nativeStream.open = true;
   m_nativeStream.isLive = isLive;
   m_nativeStream.seekable = !isLive;
+  m_nativeStream.liveEdge = liveEdge;
   m_nativeStream.channel = channel;
   m_nativeStream.programmeStartTime = isLive ? time(nullptr) : starttime;
   m_nativeStream.programmeEndTime = isLive ? 0 : endtime;
-  m_nativeStream.sessionStartTime = isLive ? time(nullptr) : starttime;
+  m_nativeStream.sessionStartTime = effectivePlaybackTime;
   m_nativeStream.sessionAnchorMonotonicMs = MonotonicNowMs();
   m_nativeStream.masterUrl = playback.url;
   m_nativeStream.bitrate = playback.bitrate;
@@ -1352,16 +1361,17 @@ bool CPVREon::OpenNativeStream(const EonChannel& channel,
     const int64_t duration =
         std::max<int64_t>(m_nativeStream.programmeEndTime - m_nativeStream.programmeStartTime, 1);
     m_nativeStream.virtualLength = duration * m_nativeStream.virtualUnitsPerSecond;
-    m_nativeStream.currentPosition = TimeToStreamPosition(starttime);
+    m_nativeStream.currentPosition = TimeToStreamPosition(effectivePlaybackTime);
   }
 
   kodi::Log(ADDON_LOG_INFO,
-            "Opening native %s stream. channel=%s uid=%i start=%lld end=%lld bitrate=%i unitsPerSecond=%lld",
+            "Opening native %s stream. channel=%s uid=%i programmeStart=%lld programmeEnd=%lld playbackStart=%lld bitrate=%i unitsPerSecond=%lld",
             isLive ? "live" : "archive",
             channel.strChannelName.c_str(),
             channel.iUniqueId,
             static_cast<long long>(starttime),
             static_cast<long long>(endtime),
+            static_cast<long long>(effectivePlaybackTime),
             playback.bitrate,
             static_cast<long long>(m_nativeStream.virtualUnitsPerSecond));
 
@@ -1398,8 +1408,10 @@ bool CPVREon::RestartNativeStreamAt(time_t starttime)
   if (m_nativeStream.programmeEndTime <= m_nativeStream.programmeStartTime)
     return false;
 
-  const time_t clampedStart =
-      std::clamp(starttime, m_nativeStream.programmeStartTime, m_nativeStream.programmeEndTime - 1);
+  const time_t seekableEndTime = GetCurrentNativeSeekableEndTime();
+  const time_t clampedStart = std::clamp(
+      starttime, m_nativeStream.programmeStartTime,
+      std::max(m_nativeStream.programmeStartTime, seekableEndTime - 1));
   const time_t currentPlaybackTime = StreamPositionToTime(GetCurrentNativePosition());
   long long restartDelta =
       static_cast<long long>(clampedStart) - static_cast<long long>(currentPlaybackTime);
@@ -1632,10 +1644,11 @@ int64_t CPVREon::GetCurrentNativePosition() const
     return 0;
 
   const int64_t basePosition = TimeToStreamPosition(m_nativeStream.sessionStartTime);
+  const int64_t maxSeekablePosition = TimeToStreamPosition(GetCurrentNativeSeekableEndTime());
   if (m_nativeStream.sessionAnchorMonotonicMs <= 0 || m_nativeStream.virtualUnitsPerSecond <= 0)
   {
     return std::clamp<int64_t>(std::max(m_nativeStream.currentPosition, basePosition), 0,
-                               m_nativeStream.virtualLength);
+                               maxSeekablePosition);
   }
 
   const int64_t elapsedMs =
@@ -1643,8 +1656,21 @@ int64_t CPVREon::GetCurrentNativePosition() const
   const int64_t elapsedUnits =
       (elapsedMs * m_nativeStream.virtualUnitsPerSecond) / 1000;
   return std::clamp<int64_t>(
-      std::max(m_nativeStream.currentPosition, basePosition + elapsedUnits), 0,
-      m_nativeStream.virtualLength);
+      std::max(m_nativeStream.currentPosition, basePosition + elapsedUnits), 0, maxSeekablePosition);
+}
+
+time_t CPVREon::GetCurrentNativeSeekableEndTime() const
+{
+  if (!m_nativeStream.open || m_nativeStream.isLive)
+    return m_nativeStream.sessionStartTime;
+
+  if (m_nativeStream.programmeEndTime <= m_nativeStream.programmeStartTime)
+    return m_nativeStream.programmeStartTime;
+
+  const time_t now = time(nullptr);
+  const time_t delayedNow =
+      now > NATIVE_LIVE_EDGE_DELAY_SECONDS ? now - NATIVE_LIVE_EDGE_DELAY_SECONDS : now;
+  return std::clamp(delayedNow, m_nativeStream.programmeStartTime, m_nativeStream.programmeEndTime);
 }
 
 time_t CPVREon::StreamPositionToTime(int64_t position) const
@@ -1856,18 +1882,27 @@ PVR_ERROR CPVREon::GetEPGTagStreamProperties(
     {
       if (UseExperimentalNativeStream())
       {
+        const time_t now = time(nullptr);
+        const bool isInProgress =
+            now > tag.GetStartTime() && now < tag.GetEndTime();
+        const time_t initialPlaybackTime = tag.GetStartTime();
+
         m_pendingPlayback.active = true;
+        m_pendingPlayback.liveEdge = isInProgress;
         m_pendingPlayback.channelUid = channel.iUniqueId;
         m_pendingPlayback.startTime = tag.GetStartTime();
         m_pendingPlayback.endTime = tag.GetEndTime();
+        m_pendingPlayback.initialPlaybackTime = initialPlaybackTime;
         m_pendingPlayback.requestTime = time(nullptr);
         properties.emplace_back(PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE, "true");
         kodi::Log(ADDON_LOG_INFO,
-                  "Queued archive playback for native stream mode. channel=%s uid=%i start=%lld end=%lld",
+                  "Queued native EPG playback. channel=%s uid=%i mode=%s programmeStart=%lld programmeEnd=%lld initialPlayback=%lld",
                   channel.strChannelName.c_str(),
                   channel.iUniqueId,
+                  isInProgress ? "archive-in-progress" : "archive",
                   static_cast<long long>(m_pendingPlayback.startTime),
-                  static_cast<long long>(m_pendingPlayback.endTime));
+                  static_cast<long long>(m_pendingPlayback.endTime),
+                  static_cast<long long>(m_pendingPlayback.initialPlaybackTime));
         return PVR_ERROR_NO_ERROR;
       }
 
@@ -2078,17 +2113,23 @@ bool CPVREon::OpenLiveStream(const kodi::addon::PVRChannel& channel)
 
   const time_t archiveStart = usePendingArchive ? m_pendingPlayback.startTime : 0;
   const time_t archiveEnd = usePendingArchive ? m_pendingPlayback.endTime : 0;
+  const time_t initialPlaybackTime =
+      usePendingArchive ? m_pendingPlayback.initialPlaybackTime : 0;
+  const bool liveEdge = usePendingArchive ? m_pendingPlayback.liveEdge : false;
 
   kodi::Log(ADDON_LOG_INFO,
-            "OpenLiveStream in native mode. channel=%s uid=%i mode=%s start=%lld end=%lld",
+            "OpenLiveStream in native mode. channel=%s uid=%i mode=%s programmeStart=%lld programmeEnd=%lld initialPlayback=%lld liveEdge=%s",
             addonChannel.strChannelName.c_str(),
             addonChannel.iUniqueId,
             usePendingArchive ? "archive" : "live",
             static_cast<long long>(archiveStart),
-            static_cast<long long>(archiveEnd));
+            static_cast<long long>(archiveEnd),
+            static_cast<long long>(initialPlaybackTime),
+            BoolState(liveEdge));
 
   m_pendingPlayback = {};
-  return OpenNativeStream(addonChannel, !usePendingArchive, archiveStart, archiveEnd);
+  return OpenNativeStream(addonChannel, !usePendingArchive, archiveStart, archiveEnd,
+                          initialPlaybackTime, liveEdge);
 }
 
 void CPVREon::CloseLiveStream()
@@ -2139,7 +2180,16 @@ int64_t CPVREon::SeekLiveStream(int64_t position, int whence)
     targetPosition = m_nativeStream.virtualLength + position;
 
   targetPosition = std::clamp<int64_t>(targetPosition, 0, m_nativeStream.virtualLength);
+  const int64_t currentPosition = GetCurrentNativePosition();
+
   const time_t targetTime = StreamPositionToTime(targetPosition);
+  kodi::Log(ADDON_LOG_INFO,
+            "SeekLiveStream request. whence=%d requested=%lld target=%lld current=%lld targetTime=%lld",
+            whence,
+            static_cast<long long>(position),
+            static_cast<long long>(targetPosition),
+            static_cast<long long>(currentPosition),
+            static_cast<long long>(targetTime));
   if (!RestartNativeStreamAt(targetTime))
     return -1;
 
@@ -2152,7 +2202,13 @@ int64_t CPVREon::LengthLiveStream()
   if (!UseExperimentalNativeStream() || !m_nativeStream.open)
     return 0;
 
-  return m_nativeStream.seekable ? m_nativeStream.virtualLength : 0;
+  if (!m_nativeStream.seekable)
+    return 0;
+
+  if (m_nativeStream.liveEdge)
+    return TimeToStreamPosition(GetCurrentNativeSeekableEndTime());
+
+  return m_nativeStream.virtualLength;
 }
 
 bool CPVREon::CanPauseStream()
@@ -2189,11 +2245,24 @@ PVR_ERROR CPVREon::GetStreamTimes(kodi::addon::PVRStreamTimes& times)
 
   const int64_t duration =
       std::max<int64_t>(m_nativeStream.programmeEndTime - m_nativeStream.programmeStartTime, 1);
+  const int64_t visibleDuration =
+      m_nativeStream.liveEdge
+          ? std::max<int64_t>(GetCurrentNativeSeekableEndTime() - m_nativeStream.programmeStartTime,
+                              1)
+          : duration;
 
   times.SetStartTime(m_nativeStream.programmeStartTime);
   times.SetPTSStart(0);
   times.SetPTSBegin(0);
-  times.SetPTSEnd(duration * PVR_TIME_BASE);
+  times.SetPTSEnd(visibleDuration * PVR_TIME_BASE);
+  kodi::Log(ADDON_LOG_INFO,
+            "GetStreamTimes archive. programmeStart=%lld programmeEnd=%lld sessionStart=%lld seekableEnd=%lld ptsStart=%lld ptsEnd=%lld",
+            static_cast<long long>(m_nativeStream.programmeStartTime),
+            static_cast<long long>(m_nativeStream.programmeEndTime),
+            static_cast<long long>(m_nativeStream.sessionStartTime),
+            static_cast<long long>(GetCurrentNativeSeekableEndTime()),
+            0LL,
+            static_cast<long long>(visibleDuration * PVR_TIME_BASE));
   return PVR_ERROR_NO_ERROR;
 }
 
