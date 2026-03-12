@@ -6,7 +6,7 @@
   provider-name="Nirvana">
   <requires>
     @ADDON_DEPENDS@
-    <import addon="inputstream.adaptive" minversion="21.0.0"/>
+    <import addon="inputstream.adaptive" minversion="@INPUTSTREAM_ADAPTIVE_MINVERSION@"/>
     <import addon="script.module.inputstreamhelper" version="0.5.8"/>
   </requires>
   <extension point="kodi.pvrclient" library_@PLATFORM@="@LIBRARY_FILENAME@"/>

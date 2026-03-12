@@ -9,7 +9,7 @@ output_root="${addon_root}/build/docker-android-aarch64"
 image_tag="pvr-eon-builder:android-aarch64"
 android_platform="${ANDROID_PLATFORM:-android-36}"
 android_build_tools="${ANDROID_BUILD_TOOLS:-36.0.0}"
-android_ndk_version="${ANDROID_NDK_VERSION:-28.2.13676358}"
+android_ndk_version="${ANDROID_NDK_VERSION:-21.4.7075529}"
 
 if [[ ! -d "${xbmc_root}/.git" ]]; then
   echo "Expected xbmc checkout at ${xbmc_root}" >&2
@@ -38,7 +38,7 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   -e BUILD_TYPE="${BUILD_TYPE:-Release}" \
   -e XBMC_REF="${XBMC_REF:-origin/Omega}" \
-  -e ANDROID_NDK_API="${ANDROID_NDK_API:-24}" \
+  -e ANDROID_NDK_API="${ANDROID_NDK_API:-21}" \
   -e ANDROID_NDK_VERSION="${android_ndk_version}" \
   -v "${xbmc_root}:/src/xbmc:ro" \
   -v "${addon_root}:/src/pvr.eon:ro" \

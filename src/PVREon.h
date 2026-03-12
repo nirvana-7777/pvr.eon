@@ -125,6 +125,8 @@ struct EonNativeStreamState
   bool isLive = true;
   bool seekable = false;
   bool liveEdge = false;
+  bool startupTimelineReady = false;
+  bool ignoreInitialArchiveSeeks = false;
   EonChannel channel;
   time_t programmeStartTime = 0;
   time_t programmeEndTime = 0;
@@ -132,6 +134,7 @@ struct EonNativeStreamState
   int64_t virtualUnitsPerSecond = 1000;
   int64_t virtualLength = 0;
   int64_t currentPosition = 0;
+  int64_t openMonotonicMs = 0;
   int64_t sessionAnchorMonotonicMs = 0;
   int bitrate = 0;
   std::string masterUrl;

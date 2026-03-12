@@ -39,6 +39,7 @@ constexpr time_t PENDING_PLAYBACK_TTL_SECONDS = 15;
 constexpr int64_t NATIVE_VIRTUAL_UNITS_PER_SECOND = 1000;
 constexpr time_t NATIVE_SEEK_RESTART_EPSILON_SECONDS = 2;
 constexpr time_t NATIVE_LIVE_EDGE_DELAY_SECONDS = 15;
+constexpr int64_t NATIVE_INITIAL_SEEK_IGNORE_WINDOW_MS = 4000;
 constexpr int NATIVE_POLL_RETRY_COUNT = 10;
 constexpr auto NATIVE_POLL_RETRY_DELAY = std::chrono::milliseconds(200);
 
@@ -297,13 +298,7 @@ std::string aes_encrypt_cbc(const std::string &iv_str, const std::string &key, c
     // encrypt
     AES_CBC_encrypt_buffer(&ctx, hexarray, dlenu);
 
-    std::ostringstream convert;
-    for (int i = 0; i < dlenu; i++) {
-        convert << hexarray[i];
-    }
-    std::string output = convert.str();
-
-    return output;
+    return std::string(reinterpret_cast<const char*>(hexarray), dlenu);
 }
 
 bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc)
@@ -1262,10 +1257,10 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
 
   std::string key = base64_decode(urlsafedecode(m_settings->GetEonStreamKey()));
 
-  std::ostringstream convert;
+  std::string iv_str;
+  iv_str.reserve(block_size);
   for (int i = 0; i < block_size; i++)
-    convert << static_cast<uint8_t>(rand());
-  std::string iv_str = convert.str();
+    iv_str.push_back(static_cast<char>(rand() & 0xFF));
 
   std::string enc_str = aes_encrypt_cbc(iv_str, key, plain_aes);
 
@@ -1347,10 +1342,14 @@ bool CPVREon::OpenNativeStream(const EonChannel& channel,
   m_nativeStream.isLive = isLive;
   m_nativeStream.seekable = !isLive;
   m_nativeStream.liveEdge = liveEdge;
+  m_nativeStream.startupTimelineReady = false;
+  m_nativeStream.ignoreInitialArchiveSeeks =
+      !isLive && !liveEdge && effectivePlaybackTime <= starttime;
   m_nativeStream.channel = channel;
   m_nativeStream.programmeStartTime = isLive ? time(nullptr) : starttime;
   m_nativeStream.programmeEndTime = isLive ? 0 : endtime;
   m_nativeStream.sessionStartTime = effectivePlaybackTime;
+  m_nativeStream.openMonotonicMs = MonotonicNowMs();
   m_nativeStream.sessionAnchorMonotonicMs = MonotonicNowMs();
   m_nativeStream.masterUrl = playback.url;
   m_nativeStream.bitrate = playback.bitrate;
@@ -2182,6 +2181,24 @@ int64_t CPVREon::SeekLiveStream(int64_t position, int whence)
   targetPosition = std::clamp<int64_t>(targetPosition, 0, m_nativeStream.virtualLength);
   const int64_t currentPosition = GetCurrentNativePosition();
 
+  if (m_nativeStream.ignoreInitialArchiveSeeks && whence == SEEK_SET && targetPosition > 0)
+  {
+    const int64_t startupAgeMs =
+        std::max<int64_t>(MonotonicNowMs() - m_nativeStream.openMonotonicMs, 0);
+    if (startupAgeMs <= NATIVE_INITIAL_SEEK_IGNORE_WINDOW_MS)
+    {
+      kodi::Log(ADDON_LOG_INFO,
+                "Ignoring initial Kodi archive seek. requested=%lld target=%lld current=%lld ageMs=%lld",
+                static_cast<long long>(position),
+                static_cast<long long>(targetPosition),
+                static_cast<long long>(currentPosition),
+                static_cast<long long>(startupAgeMs));
+      return currentPosition;
+    }
+
+    m_nativeStream.ignoreInitialArchiveSeeks = false;
+  }
+
   const time_t targetTime = StreamPositionToTime(targetPosition);
   kodi::Log(ADDON_LOG_INFO,
             "SeekLiveStream request. whence=%d requested=%lld target=%lld current=%lld targetTime=%lld",
@@ -2250,6 +2267,17 @@ PVR_ERROR CPVREon::GetStreamTimes(kodi::addon::PVRStreamTimes& times)
           ? std::max<int64_t>(GetCurrentNativeSeekableEndTime() - m_nativeStream.programmeStartTime,
                               1)
           : duration;
+
+  if (!m_nativeStream.startupTimelineReady)
+  {
+    m_nativeStream.startupTimelineReady = true;
+    if (m_nativeStream.ignoreInitialArchiveSeeks)
+    {
+      m_nativeStream.ignoreInitialArchiveSeeks = false;
+      kodi::Log(ADDON_LOG_INFO,
+                "Native archive startup timeline ready. Enabling archive seeks.");
+    }
+  }
 
   times.SetStartTime(m_nativeStream.programmeStartTime);
   times.SetPTSStart(0);

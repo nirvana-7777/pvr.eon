@@ -9,7 +9,7 @@ output_root="${addon_root}/build/docker-android-armv7"
 image_tag="pvr-eon-builder:android-armv7"
 android_platform="${ANDROID_PLATFORM:-android-36}"
 android_build_tools="${ANDROID_BUILD_TOOLS:-36.0.0}"
-android_ndk_version="${ANDROID_NDK_VERSION:-28.2.13676358}"
+android_ndk_version="${ANDROID_NDK_VERSION:-21.4.7075529}"
 
 if [[ ! -d "${xbmc_root}/.git" ]]; then
   echo "Expected xbmc checkout at ${xbmc_root}" >&2

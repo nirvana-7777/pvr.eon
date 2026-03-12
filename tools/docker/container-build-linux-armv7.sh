@@ -3,6 +3,7 @@ set -euo pipefail
 
 : "${PVR_EON_ID:=pvr.eon}"
 : "${XBMC_REF:=origin/Omega}"
+: "${PVR_EON_REF:=}"
 : "${BUILD_TYPE:=Release}"
 : "${LINUX_HOST:=arm-linux-gnueabihf}"
 : "${LINUX_RENDER_SYSTEM:=gles}"
@@ -64,7 +65,17 @@ if ! git -C "${xbmc_work}" rev-parse --verify "${XBMC_REF}" >/dev/null 2>&1; the
   exit 1
 fi
 
-git -C "${xbmc_work}" checkout --detach "${XBMC_REF}" >/dev/null
+git -C "${xbmc_work}" checkout --detach -f "${XBMC_REF}" >/dev/null
+
+if [[ -n "${PVR_EON_REF}" ]]; then
+  if ! git -C "${addon_work}" rev-parse --verify "${PVR_EON_REF}" >/dev/null 2>&1; then
+    echo "Missing addon ref '${PVR_EON_REF}' in the mounted repo." >&2
+    echo "Fetch the requested branch into the local pvr.eon clone first." >&2
+    exit 1
+  fi
+
+  git -C "${addon_work}" checkout --detach -f "${PVR_EON_REF}" >/dev/null
+fi
 
 printf '%s . .\n' "${PVR_EON_ID}" > "${definition_dir}/${PVR_EON_ID}/${PVR_EON_ID}.txt"
 printf 'linux\n' > "${definition_dir}/${PVR_EON_ID}/platforms.txt"

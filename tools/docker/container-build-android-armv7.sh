@@ -6,7 +6,7 @@ set -euo pipefail
 : "${BUILD_TYPE:=Release}"
 : "${ANDROID_HOST:=arm-linux-androideabi}"
 : "${ANDROID_NDK_API:=21}"
-: "${ANDROID_NDK_VERSION:=28.2.13676358}"
+: "${ANDROID_NDK_VERSION:=21.4.7075529}"
 : "${ANDROID_SDK_ROOT:=/opt/android-sdk}"
 
 src_root=/src
@@ -101,6 +101,7 @@ cmake \
   -DCORE_SOURCE_DIR="${xbmc_work}" \
   -DCMAKE_TOOLCHAIN_FILE="${toolchain_file}" \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-static-libstdc++" \
   -DCMAKE_INSTALL_PREFIX="${install_dir}" \
   -DPACKAGE_DIR="${package_dir}" \
   -DPACKAGE_ZIP=1

@@ -5,8 +5,8 @@ set -euo pipefail
 : "${XBMC_REF:=origin/Omega}"
 : "${BUILD_TYPE:=Release}"
 : "${ANDROID_HOST:=aarch64-linux-android}"
-: "${ANDROID_NDK_API:=24}"
-: "${ANDROID_NDK_VERSION:=28.2.13676358}"
+: "${ANDROID_NDK_API:=21}"
+: "${ANDROID_NDK_VERSION:=21.4.7075529}"
 : "${ANDROID_SDK_ROOT:=/opt/android-sdk}"
 
 src_root=/src
