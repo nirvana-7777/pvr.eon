@@ -203,6 +203,23 @@ std::vector<std::string> ExtractMediaSegmentUrls(const std::string& playlistBody
   return urls;
 }
 
+std::string ExpectedBrandIdentifier(int providerSetting)
+{
+  switch (providerSetting)
+  {
+    case 0: // SBB
+      return "sbb-qa";
+    case 1: // Telemach
+      return "telemach";
+    case 3: // Vivacom
+      return "vivacom";
+    case 5: // Nova
+      return "nova";
+    default:
+      return "";
+  }
+}
+
 } // namespace
 
 /***********************************************************
@@ -404,6 +421,7 @@ std::string CPVREon::GetBrandIdentifier()
 
   int i = 0;
   int sp_id = m_settings->GetEonServiceProvider();
+  const std::string expected_identifier = ExpectedBrandIdentifier(sp_id);
   kodi::Log(ADDON_LOG_DEBUG, "Requested Service Provider ID:%u", sp_id);
 
   const rapidjson::Value& brands = doc;
@@ -411,11 +429,39 @@ std::string CPVREon::GetBrandIdentifier()
   for (rapidjson::Value::ConstValueIterator itr1 = brands.Begin();
       itr1 != brands.End(); ++itr1)
   {
-    if (i == sp_id) {
-      const rapidjson::Value& brandItem = (*itr1);
+    const rapidjson::Value& brandItem = (*itr1);
+    const std::string identifier = Utils::JsonStringOrEmpty(brandItem, "identifier");
+    if (!expected_identifier.empty() && identifier == expected_identifier)
+    {
+      kodi::Log(ADDON_LOG_INFO,
+                "Resolved provider setting %i via stable brand identifier '%s'.",
+                sp_id, identifier.c_str());
       return Utils::JsonStringOrEmpty(brandItem, "cdnIdentifier");
     }
+
+    if (expected_identifier.empty() && i == sp_id)
+      return Utils::JsonStringOrEmpty(brandItem, "cdnIdentifier");
+
     i++;
+  }
+
+  if (!expected_identifier.empty())
+  {
+    kodi::Log(ADDON_LOG_WARNING,
+              "Stable brand identifier '%s' was not found for provider setting %i. Falling back to legacy index mapping.",
+              expected_identifier.c_str(), sp_id);
+
+    i = 0;
+    for (rapidjson::Value::ConstValueIterator itr1 = brands.Begin();
+         itr1 != brands.End(); ++itr1)
+    {
+      if (i == sp_id)
+      {
+        const rapidjson::Value& brandItem = (*itr1);
+        return Utils::JsonStringOrEmpty(brandItem, "cdnIdentifier");
+      }
+      i++;
+    }
   }
 
   return "";
