@@ -54,6 +54,7 @@ std::string Curl::Request(const std::string& action, const std::string& url, con
   kodi::vfs::CFile file;
   if (!file.CURLCreate(url))
   {
+    kodi::Log(ADDON_LOG_ERROR, "CURLCreate failed for %s %s.", action.c_str(), url.c_str());
     statusCode = -1;
     return "";
   }
@@ -80,6 +81,7 @@ std::string Curl::Request(const std::string& action, const std::string& url, con
 
   if (!file.CURLOpen(ADDON_READ_NO_CACHE))
   {
+    kodi::Log(ADDON_LOG_ERROR, "CURLOpen failed for %s %s.", action.c_str(), url.c_str());
     statusCode = -2;
     return "";
   }
@@ -88,10 +90,6 @@ std::string Curl::Request(const std::string& action, const std::string& url, con
   std::string::size_type posResponseCode = proto.find(' ');
   if (posResponseCode != std::string::npos)
     statusCode = atoi(proto.c_str() + (posResponseCode + 1));
-  
-  if (statusCode >= 400) {
-    return "";
-  }
 
   const std::vector<std::string> values = file.GetPropertyValues(ADDON_FILE_PROPERTY_RESPONSE_HEADER, "set-cookie");
   for (const auto& value : values)

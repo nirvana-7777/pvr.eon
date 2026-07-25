@@ -115,6 +115,12 @@ bool CSettings::Load()
     return false;
   }
 
+  if (!kodi::addon::CheckSettingBoolean("experimentalnativestream", m_experimentalNativeStream))
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'experimentalnativestream' setting");
+    return false;
+  }
+
   if (!kodi::addon::CheckSettingString("genericaccesstoken", m_Generic_AccessToken))
   {
     /* If setting is unknown fallback to defaults */
@@ -345,6 +351,14 @@ ADDON_STATUS CSettings::SetSetting(const std::string& settingName,
       kodi::addon::SetSettingString("ssidentity", m_SS_Identity);
     //      return ADDON_STATUS_NEED_RESTART;
     }
+  }
+  else if (settingName == "experimentalnativestream")
+  {
+    const bool previous = m_experimentalNativeStream;
+    kodi::Log(ADDON_LOG_DEBUG, "Changed Setting 'experimentalnativestream'");
+    m_experimentalNativeStream = settingValue == "true";
+    if (previous != m_experimentalNativeStream)
+      return ADDON_STATUS_NEED_RESTART;
   }
 
   return ADDON_STATUS_OK;

@@ -1,3 +1,5 @@
+v21.7.11
+  - Maintenance release
 v21.5.0
 - Initial release
 v21.6.0

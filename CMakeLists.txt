@@ -40,6 +40,12 @@ set(EON_HEADERS
 addon_version(pvr.eon EON)
 add_definitions(-DEON_VERSION=${EON_VERSION})
 
+if(DEFINED APP_VERSION_MAJOR)
+  set(INPUTSTREAM_ADAPTIVE_MINVERSION "${APP_VERSION_MAJOR}.0.0")
+else()
+  set(INPUTSTREAM_ADAPTIVE_MINVERSION "21.0.0")
+endif()
+
 build_addon(pvr.eon EON DEPLIBS)
 
 include(CPack)

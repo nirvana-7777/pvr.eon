@@ -5,9 +5,9 @@
 
 #include <algorithm>
 #include <chrono>
-#include <iomanip>
 #include <iterator>
-#include <sstream>
+#include <cerrno>
+#include <cstdlib>
 
 #include <iostream>
 #include <kodi/Filesystem.h>
@@ -21,32 +21,34 @@ std::string Utils::GetFilePath(const std::string &strPath, bool bUserPath)
 // http://stackoverflow.com/a/17708801
 std::string Utils::UrlEncode(const std::string &value)
 {
-  std::ostringstream escaped;
-  escaped.fill('0');
-  escaped << std::hex;
+  static const char hex_digits[] = "0123456789abcdef";
+  std::string escaped;
+  escaped.reserve(value.size() * 3);
 
   for (char c : value) {
       // Keep alphanumeric and other accepted characters intact
     if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~' || c == '!') // Exclamation mark should not be here but Zattoo does not correctly encode it
     {
-      escaped << c;
+      escaped.push_back(c);
       continue;
     }
 
     // Any other characters are percent-encoded
-    escaped << '%' << std::setw(2) << int((unsigned char) c);
+    escaped.push_back('%');
+    escaped.push_back(hex_digits[(static_cast<unsigned char>(c) >> 4) & 0x0F]);
+    escaped.push_back(hex_digits[static_cast<unsigned char>(c) & 0x0F]);
   }
 
-  return escaped.str();
+  return escaped;
 }
 
 double Utils::StringToDouble(const std::string &value)
 {
-  std::istringstream iss(value);
-  double result;
-
-  iss >> result;
-
+  errno = 0;
+  char* end = nullptr;
+  const double result = std::strtod(value.c_str(), &end);
+  if (end == value.c_str() || errno != 0)
+    return 0.0;
   return result;
 }
 

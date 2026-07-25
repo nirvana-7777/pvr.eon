@@ -1,7 +1,5 @@
 #include "SHA256.h"
 #include <cstring>
-#include <sstream>
-#include <iomanip>
 
 SHA256::SHA256(): m_blocklen(0), m_bitlen(0) {
 	m_state[0] = 0x6a09e667;
@@ -142,12 +140,14 @@ void SHA256::revert(uint8_t * hash) {
 }
 
 std::string SHA256::toString(const uint8_t * digest) {
-	std::stringstream s;
-	s << std::setfill('0') << std::hex;
+	static const char hex_digits[] = "0123456789abcdef";
+	std::string output;
+	output.reserve(64);
 
 	for(uint8_t i = 0 ; i < 32 ; i++) {
-		s << std::setw(2) << (unsigned int) digest[i];
+		output.push_back(hex_digits[(digest[i] >> 4) & 0x0F]);
+		output.push_back(hex_digits[digest[i] & 0x0F]);
 	}
 
-	return s.str();
+	return output;
 }

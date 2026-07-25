@@ -28,12 +28,47 @@ This is the EON.tv PVR client addon for Kodi. It provides Kodi integration for t
 4. `cmake -DADDONS_TO_BUILD=pvr.eon -DADDON_SRC_PREFIX=../.. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=../../xbmc/addons -DPACKAGE_ZIP=1 ../../xbmc/cmake/addons`
 5. `make`
 
+### Local checkout note
+
+- `ADDON_SRC_PREFIX` only redirects the source path. Kodi still requires an addon definition for `pvr.eon` via `ADDONS_DEFINITION_DIR` or `xbmc/cmake/addons/addons/pvr.eon/pvr.eon.txt`.
+- The current `xbmc` `master` branch tracks Kodi `Piers` (v22). The `Omega` branch of this addon should be built against an `xbmc` Omega checkout.
+- Reproducible Docker builds are available under `tools/docker/` for:
+  - Linux `x86_64`: `build-linux-amd64.sh`
+  - Linux `armv7`: `build-linux-armv7.sh`
+  - Linux `aarch64`: `build-linux-aarch64.sh`
+  - Android `armv7`: `build-android-armv7.sh`
+  - Android `aarch64`: `build-android-aarch64.sh`
+
+### Docker builds
+
+1. Ensure the sibling `xbmc` checkout has `origin/Omega`.
+2. Run the matching build script for your target from the addon root, for example `./tools/docker/build-linux-amd64.sh` or `./tools/docker/build-android-aarch64.sh`.
+3. Use the generated zip from the corresponding `build/docker-*/zips/` directory.
+
+For ARM Linux targets, the Docker scripts default to `LINUX_RENDER_SYSTEM=gles`. If your target uses desktop OpenGL, override it, for example:
+
+`LINUX_RENDER_SYSTEM=gl ./tools/docker/build-linux-aarch64.sh`
+
+The Android Docker image installs:
+- Android SDK command-line tools
+- Android platform `android-36`
+- Android build-tools `36.0.0`
+- Android NDK `28.2.13676358`
+
+The build uses Kodi's `tools/depends` step only to generate the Android binary-addon toolchain, then cross-builds `pvr.eon` through `xbmc/cmake/addons`.
+
+For older Android Kodi builds, you can match the Kodi tag and Android NDK used by that Kodi release. Example for Kodi 21.2:
+
+`XBMC_REF=21.2-Omega ANDROID_NDK_VERSION=21.4.7075529 ANDROID_NDK_API=21 ./tools/docker/build-android-aarch64.sh`
+
 ## Notes
 
-- Tested building it for Linux and Android / x86 and aarch64
+- Tested building it for Linux `x86_64`, Linux `armv7`, Linux `aarch64`, Android `armv7`, and Android `aarch64`
 - Only tested Telemach.ba, but other should work as well or should be easy to fix
 - Depends on inputstream addon
-- Fast forward and rewind won't work in Replay TV because that is handled via specific servers which inputstream does not support
+- Standard inputstream-based Replay TV still behaves like a short rolling live HLS window on EON/Vivacom, so full seek/rewind is limited there
+- `Experimental native archive streaming` adds working archive seek support for finished replay programmes and for `EPG -> Play programme` on already-started events
+- Direct live channel `Switch` still uses the standard live playback path and does not yet expose the native archive/timeshift behavior
 
 ##### Useful links
 

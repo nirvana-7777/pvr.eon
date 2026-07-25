@@ -7,6 +7,7 @@
  */
 
 #include <string>
+#include <deque>
 #include <vector>
 
 #include <kodi/addon-instance/PVR.h>
@@ -107,6 +108,43 @@ struct EonCDN
   bool isDefault;
 };
 
+struct EonPendingPlayback
+{
+  bool active = false;
+  bool liveEdge = false;
+  int channelUid = 0;
+  time_t startTime = 0;
+  time_t endTime = 0;
+  time_t initialPlaybackTime = 0;
+  time_t requestTime = 0;
+};
+
+struct EonNativeStreamState
+{
+  bool open = false;
+  bool isLive = true;
+  bool seekable = false;
+  bool liveEdge = false;
+  bool startupTimelineReady = false;
+  bool ignoreInitialArchiveSeeks = false;
+  EonChannel channel;
+  time_t programmeStartTime = 0;
+  time_t programmeEndTime = 0;
+  time_t sessionStartTime = 0;
+  int64_t virtualUnitsPerSecond = 1000;
+  int64_t virtualLength = 0;
+  int64_t currentPosition = 0;
+  int64_t openMonotonicMs = 0;
+  int64_t sessionAnchorMonotonicMs = 0;
+  int bitrate = 0;
+  std::string masterUrl;
+  std::string variantUrl;
+  std::deque<std::string> pendingFragments;
+  std::string lastFragmentUrl;
+  std::vector<uint8_t> currentFragmentData;
+  size_t currentFragmentOffset = 0;
+};
+
 class ATTR_DLL_LOCAL CPVREon : public kodi::addon::CAddonBase,
                                 public kodi::addon::CInstancePVRClient
 {
@@ -149,6 +187,15 @@ public:
   PVR_ERROR GetRecordingStreamProperties(
       const kodi::addon::PVRRecording& recording,
       std::vector<kodi::addon::PVRStreamProperty>& properties) override;
+  bool OpenLiveStream(const kodi::addon::PVRChannel& channel) override;
+  void CloseLiveStream() override;
+  int ReadLiveStream(unsigned char* buffer, unsigned int size) override;
+  int64_t SeekLiveStream(int64_t position, int whence) override;
+  int64_t LengthLiveStream() override;
+  bool CanPauseStream() override;
+  bool CanSeekStream() override;
+  bool IsRealTimeStream() override;
+  PVR_ERROR GetStreamTimes(kodi::addon::PVRStreamTimes& times) override;
 
   ADDON_STATUS SetSetting(const std::string& settingName,
                         const std::string& settingValue);
@@ -159,14 +206,50 @@ protected:
   bool GetServer(bool isLive, EonServer& myServer);
 
 private:
+  struct EonPlaybackUrlResult
+  {
+    std::string url;
+    std::string streamProfile;
+    int bitrate = 0;
+  };
+
   void SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,
                            const std::string& url,
-                           const bool& realtime, const bool& playTimeshiftBuffer, const bool& isLive /*,
-                          time_t starttime, time_t endtime*/);
+                           const bool& realtime,
+                           const bool& playTimeshiftBuffer,
+                           const bool& isLive,
+                           time_t starttime,
+                           time_t endtime);
+  bool BuildPlaybackUrl(const EonChannel& channel,
+                        time_t starttime,
+                        time_t endtime,
+                        const bool& isLive,
+                        EonPlaybackUrlResult& result,
+                        const bool includeDiagnostics = true);
+  bool UseExperimentalNativeStream() const;
+  bool OpenNativeStream(const EonChannel& channel,
+                        bool isLive,
+                        time_t starttime,
+                        time_t endtime,
+                        time_t initialPlaybackTime = 0,
+                        bool liveEdge = false);
+  void CloseNativeStreamInternal();
+  bool RestartNativeStreamAt(time_t starttime);
+  bool UpdateNativeVariantUrl(bool logErrors = true);
+  bool PollNativeFragmentQueue(bool forceRefresh = false);
+  bool LoadNextNativeFragment();
+  bool FetchBinaryUrl(const std::string& url, std::vector<uint8_t>& data, int& statusCode);
+  int64_t GetCurrentNativePosition() const;
+  time_t GetCurrentNativeSeekableEndTime() const;
+  time_t StreamPositionToTime(int64_t position) const;
+  int64_t TimeToStreamPosition(time_t timeValue) const;
 
   PVR_ERROR GetStreamProperties(
     const EonChannel& channel,
-    std::vector<kodi::addon::PVRStreamProperty>& properties, time_t starttime,/* time_t endtime, */const bool& isLive);
+    std::vector<kodi::addon::PVRStreamProperty>& properties,
+    time_t starttime,
+    time_t endtime,
+    const bool& isLive);
 
   std::vector<EonChannel> m_channels;
   std::vector<EonServer> m_live_servers;
@@ -198,6 +281,8 @@ private:
   std::string m_api;
   std::string m_images_api;
   int m_platform;
+  EonPendingPlayback m_pendingPlayback;
+  EonNativeStreamState m_nativeStream;
 
 //  std::string m_ss_refresh;
 //  int m_active_profile_id;
@@ -222,6 +307,7 @@ private:
   bool GetRenderingProfiles();
   bool LoadChannels(const bool isRadio);
   bool GetCategories(const bool isRadio);
+  bool RefreshDeviceRegistration();
   int GetDefaultNumber(const bool isRadio, int id);
   bool HandleSession(bool start, int cid, int epg_id);
 };
