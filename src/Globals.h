@@ -63,7 +63,7 @@ static const EonParameter EonParameters[2] = {{
                                                 "",
                                                 "Linux",
                                                 "x86_64",
-                                                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36",
+                                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
                                                 "b8d9ade4-1093-46a7-a4f7-0e47be463c10",
                                                 "1w4dmww87x1e9l89essqvc81pidrqsa0li1rva23"
                                               },
