@@ -12,6 +12,7 @@
 
 #include <kodi/addon-instance/PVR.h>
 #include "Settings.h"
+#include "StreamRedirectProxy.h"
 #include "http/HttpClient.h"
 #include "rapidjson/document.h"
 
@@ -219,7 +220,8 @@ private:
                            const bool& playTimeshiftBuffer,
                            const bool& isLive,
                            time_t starttime,
-                           time_t endtime);
+                           time_t endtime,
+                           bool catchupProxyReady);
   bool BuildPlaybackUrl(const EonChannel& channel,
                         time_t starttime,
                         time_t endtime,
@@ -273,6 +275,14 @@ private:
   std::string m_session_id;
   std::string m_stream_key;
   std::string m_stream_un;
+
+  // Currently playing programme, tracked for GetStreamTimes() (progress
+  // bar / timeline) on the standard (non-native-stream) playback path.
+  time_t m_stream_start_time = 0;
+  time_t m_stream_end_time = 0;
+  bool m_stream_is_live = false;
+  StreamRedirectProxy m_redirectProxy;
+
   std::string m_service_provider;
   std::string m_support_web;
 //  std::string m_ss_access;
