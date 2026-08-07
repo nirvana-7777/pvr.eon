@@ -1871,8 +1871,12 @@ PVR_ERROR CPVREon::GetEPGForChannel(int channelUid,
                               "&fromTime=" + std::to_string(start) + "000" +
                               "&toTime=" + std::to_string(end) + "000";
 
+    // Kodi calls this in the background to populate the EPG grid, often for
+    // many channels back-to-back (e.g. at startup) -- a modal error dialog
+    // per failed channel would be extremely disruptive. One channel's EPG
+    // failing isn't fatal: Kodi just shows no EPG data for it and moves on.
     rapidjson::Document epgDoc;
-    if (!GetPostJson(url, "", epgDoc)) {
+    if (!GetPostJson(url, "", epgDoc, false)) {
       kodi::Log(ADDON_LOG_ERROR, "[GetEPG] ERROR: error while parsing json");
       return PVR_ERROR_SERVER_ERROR;
     }
