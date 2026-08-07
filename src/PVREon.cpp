@@ -1086,7 +1086,8 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
                                   const bool& isLive,
                                   time_t starttime,
                                   time_t endtime,
-                                  bool catchupProxyReady)
+                                  bool catchupProxyReady,
+                                  bool playForwardIndefinitely)
 {
   kodi::Log(ADDON_LOG_DEBUG,
             "[PLAY STREAM] url=%s realtime=%s playTimeshiftBuffer=%s mode=%s start=%lld end=%lld",
@@ -1171,7 +1172,15 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
       // growing with real time instead of capping it at the programme's
       // (possibly still in the future) end time.
       properties.emplace_back("inputstream.ffmpegdirect.stream_mode", "catchup");
-      properties.emplace_back("inputstream.ffmpegdirect.playback_as_live", isLive ? "true" : "false");
+      // playForwardIndefinitely: a specific past programme resumed via the
+      // EPGPLAYBACKASLIVE hand-off (see GetChannelStreamProperties) -- it
+      // must start at ITS OWN beginning (isLive=false keeps BuildPlaybackUrl
+      // and catchup_buffer_offset targeting starttime, not "now"), but the
+      // underlying feed keeps extending past this programme's nominal end
+      // into whatever airs next, so the seekable end needs to keep growing
+      // with real time exactly like live does, not freeze at endtime.
+      properties.emplace_back("inputstream.ffmpegdirect.playback_as_live",
+                               (isLive || playForwardIndefinitely) ? "true" : "false");
       properties.emplace_back("inputstream.ffmpegdirect.programme_start_time", std::to_string(starttime));
       properties.emplace_back("inputstream.ffmpegdirect.programme_end_time", std::to_string(endtime));
       properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_start_time", std::to_string(starttime));
@@ -2011,11 +2020,23 @@ PVR_ERROR CPVREon::GetEPGTagStreamProperties(
         return PVR_ERROR_NO_ERROR;
       }
 
-      m_stream_is_live = false;
-      m_stream_start_time = tag.GetStartTime();
-      m_stream_end_time = tag.GetEndTime();
-
-      return GetStreamProperties(channel, properties, tag.GetStartTime(), tag.GetEndTime(), false);
+      // EON's replay/catchup manifest never sets #EXT-X-ENDLIST -- it's a
+      // continuously-extending feed, not a finite recording, so playback
+      // just carries on into whatever airs next on the channel once this
+      // programme's nominal end time passes. Kodi only tracks title/EPG
+      // info dynamically for channel-type playback sessions (a fixed
+      // EPG-tag session stays pinned to this tag for its whole lifetime,
+      // by design) -- so hand this off as EPGPLAYBACKASLIVE and stash the
+      // actual requested start/end time for GetChannelStreamProperties to
+      // pick up, since Kodi discards whatever we return here and reopens
+      // via the channel path instead, which otherwise defaults to "now".
+      m_pendingReplayAsLive.active = true;
+      m_pendingReplayAsLive.channelUid = channel.iUniqueId;
+      m_pendingReplayAsLive.startTime = tag.GetStartTime();
+      m_pendingReplayAsLive.endTime = tag.GetEndTime();
+      m_pendingReplayAsLive.requestTime = time(nullptr);
+      properties.emplace_back(PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE, "true");
+      return PVR_ERROR_NO_ERROR;
     }
   }
   return PVR_ERROR_NO_ERROR;
@@ -2076,7 +2097,8 @@ PVR_ERROR CPVREon::GetStreamProperties(
     std::vector<kodi::addon::PVRStreamProperty>& properties,
     time_t starttime,
     time_t endtime,
-    const bool& isLive)
+    const bool& isLive,
+    bool playForwardIndefinitely)
 {
     kodi::Log(ADDON_LOG_DEBUG,
               "function call: [%s] channel=%s uid=%i mode=%s start=%lld end=%lld",
@@ -2128,10 +2150,14 @@ PVR_ERROR CPVREon::GetStreamProperties(
                          : "simplified replay mode");
     }
 
-    m_live_using_catchup = isLive && catchupProxyReady;
+    // Also true for a resumed past programme (see GetChannelStreamProperties's
+    // EPGPLAYBACKASLIVE hand-off): its underlying feed keeps extending past
+    // its own nominal end too, so ffmpegdirect's own accurate, growing
+    // catchup-mode times are the correct source for it as well.
+    m_live_using_catchup = (isLive || playForwardIndefinitely) && catchupProxyReady;
 
     SetStreamProperties(properties, playback.url, isLive, false, isLive, starttime, endtime,
-                         catchupProxyReady);
+                         catchupProxyReady, playForwardIndefinitely);
 
     if (catchupProxyReady)
     {
@@ -2179,6 +2205,38 @@ PVR_ERROR CPVREon::GetChannelStreamProperties(
   EonChannel addonChannel;
   if (GetChannel(channel, addonChannel)) {
     if (addonChannel.subscribed) {
+      // Pick up a replay/catchup request handed off via
+      // GetEPGTagStreamProperties's EPGPLAYBACKASLIVE (see there) instead
+      // of defaulting to a normal live tune-in at "now".
+      const time_t pendingCheckNow = time(nullptr);
+      if (m_pendingReplayAsLive.active &&
+          m_pendingReplayAsLive.channelUid == addonChannel.iUniqueId &&
+          pendingCheckNow - m_pendingReplayAsLive.requestTime <= PENDING_PLAYBACK_TTL_SECONDS)
+      {
+        const time_t pendingStart = m_pendingReplayAsLive.startTime;
+        const time_t pendingEnd = m_pendingReplayAsLive.endTime;
+        m_pendingReplayAsLive = {};
+
+        m_stream_is_live = false;
+        m_stream_start_time = pendingStart;
+        m_stream_end_time = pendingEnd;
+
+        kodi::Log(ADDON_LOG_INFO,
+                  "Resuming handed-off replay via channel open. channelUid=%i start=%lld end=%lld",
+                  addonChannel.iUniqueId, static_cast<long long>(pendingStart),
+                  static_cast<long long>(pendingEnd));
+
+        // isLive=false: BuildPlaybackUrl and catchup_buffer_offset must
+        // target pendingStart, not "now" (that's the whole point of this
+        // hand-off). playForwardIndefinitely=true: still keep the seekable
+        // end growing with real time (see SetStreamProperties) so seeking
+        // doesn't break once playback continues past pendingEnd into
+        // whatever airs next.
+        return GetStreamProperties(addonChannel, properties, pendingStart, pendingEnd, false,
+                                    /*playForwardIndefinitely=*/true);
+      }
+      m_pendingReplayAsLive = {};
+
       m_stream_is_live = true;
       m_stream_start_time = 0;
       m_stream_end_time = 0;
@@ -2457,20 +2515,22 @@ PVR_ERROR CPVREon::GetStreamTimes(kodi::addon::PVRStreamTimes& times)
 {
   if (!UseExperimentalNativeStream() || !m_nativeStream.open)
   {
-    // Standard (non-native-stream) playback. Live normally plays through
-    // the same inputstream.ffmpegdirect catchup mode as replay (see
-    // SetStreamProperties), which has its own accurate, seek-aware
-    // GetTimes() -- reporting our own real-time "now minus programme
-    // start" estimate here as well fights it: after a seek, the demuxer's
-    // real position no longer matches "elapsed since programme start", but
-    // this function would keep reporting the latter, overriding the
-    // correct value with a stale/misleading one. Defer to ffmpegdirect
-    // whenever catchup mode is actually active. If it isn't (EPG lookup or
-    // proxy start failed, so live fell back to plain stream_mode=timeshift),
-    // ffmpegdirect's own times only cover its local buffer since tune-in,
-    // not the programme -- so keep reporting our own estimate there, same
-    // as replay/catchup, which ffmpegdirect can't infer on its own either.
-    if ((m_stream_is_live && m_live_using_catchup) || m_stream_start_time <= 0 ||
+    // Standard (non-native-stream) playback. Live, and a resumed past
+    // programme handed off via EPGPLAYBACKASLIVE, both normally play
+    // through the same inputstream.ffmpegdirect catchup mode as replay
+    // (see SetStreamProperties), which has its own accurate, seek-aware,
+    // growing GetTimes() -- reporting our own fixed/real-time estimate
+    // here as well fights it: after a seek (or once playback continues
+    // past this programme's own end), the demuxer's real position no
+    // longer matches what we'd compute, but this function would keep
+    // reporting the latter, overriding the correct value with a stale one.
+    // m_live_using_catchup is only true when that catchup mode actually
+    // started; if it didn't (EPG lookup or proxy start failed, so live fell
+    // back to plain stream_mode=timeshift), ffmpegdirect's own times only
+    // cover its local buffer since tune-in, not the programme -- so keep
+    // reporting our own estimate there, same as plain replay/catchup, which
+    // ffmpegdirect can't infer on its own either.
+    if (m_live_using_catchup || m_stream_start_time <= 0 ||
         m_stream_end_time <= m_stream_start_time)
       return PVR_ERROR_NOT_IMPLEMENTED;
 

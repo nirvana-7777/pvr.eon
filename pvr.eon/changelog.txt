@@ -1,3 +1,6 @@
+v21.8.4
+  - Fix replay/catchup not updating title/progress once playback continues
+    past the watched show's scheduled end
 v21.8.3
   - Fix the same spurious "invalid_input" error dialog also appearing during
     background EPG grid refresh
