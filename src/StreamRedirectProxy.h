@@ -43,6 +43,10 @@ struct StreamParams
   // smart-device UA the same way it does for the main manifest fetch
   // (see issue #16 / EonParameters[m_platform].user_agent).
   std::string userAgent;
+  // 0 = default (let ffmpeg pick), 1 = highest bitrate, 2 = lowest bitrate.
+  // Applied to every URL this proxy mints, not just the initial one, so a
+  // pinned quality survives seeks instead of resetting on each one.
+  int qualityPreference = 0;
 };
 
 // A local loopback HTTP server used as inputstream.ffmpegdirect's

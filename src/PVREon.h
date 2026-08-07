@@ -311,7 +311,8 @@ private:
 
   std::string GetTime();
   int getBitrate(const bool isRadio, const int id);
-  bool GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc);
+  bool GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc,
+                    bool showErrorDialog = true);
   std::string getCoreStreamId(const int id);
   std::string GetBaseApi(const std::string& cdn_identifier);
   std::string GetBrandIdentifier();

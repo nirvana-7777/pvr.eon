@@ -240,6 +240,22 @@ msgctxt "#30057"
 msgid "Experimental native archive streaming"
 msgstr ""
 
+msgctxt "#30058"
+msgid "ffmpegdirect Quality"
+msgstr ""
+
+msgctxt "#30059"
+msgid "Default"
+msgstr ""
+
+msgctxt "#30060"
+msgid "Highest bitrate"
+msgstr ""
+
+msgctxt "#30061"
+msgid "Lowest bitrate"
+msgstr ""
+
 msgctxt "#30500"
 msgid "Inputstream error"
 msgstr ""

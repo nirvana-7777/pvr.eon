@@ -111,57 +111,13 @@ size_t CountOccurrences(const std::string& haystack, const std::string& needle)
   return count;
 }
 
-std::string Trim(std::string value)
-{
-  while (!value.empty() && (value.back() == '\r' || value.back() == '\n' || value.back() == ' ' || value.back() == '\t'))
-    value.pop_back();
-
-  size_t start = 0;
-  while (start < value.size() && (value[start] == ' ' || value[start] == '\t'))
-    ++start;
-
-  return value.substr(start);
-}
-
-std::string ResolvePlaylistUrl(const std::string& baseUrl, const std::string& childUrl)
-{
-  if (childUrl.empty())
-    return "";
-
-  if (childUrl.rfind("https://", 0) == 0 || childUrl.rfind("http://", 0) == 0)
-    return childUrl;
-
-  const size_t schemePos = baseUrl.find("://");
-  if (schemePos == std::string::npos)
-    return childUrl;
-
-  const std::string scheme = baseUrl.substr(0, schemePos);
-  const size_t authorityStart = schemePos + 3;
-  const size_t pathStart = baseUrl.find('/', authorityStart);
-  const std::string authority = pathStart == std::string::npos
-                                    ? baseUrl.substr(authorityStart)
-                                    : baseUrl.substr(authorityStart, pathStart - authorityStart);
-
-  if (childUrl.rfind("//", 0) == 0)
-    return scheme + ":" + childUrl;
-
-  if (childUrl.front() == '/')
-    return scheme + "://" + authority + childUrl;
-
-  const size_t lastSlash = baseUrl.rfind('/');
-  if (lastSlash == std::string::npos || lastSlash < authorityStart)
-    return scheme + "://" + authority + "/" + childUrl;
-
-  return baseUrl.substr(0, lastSlash + 1) + childUrl;
-}
-
 std::string FirstVariantPlaylistUrl(const std::string& manifestBody, const std::string& baseUrl)
 {
   size_t pos = 0;
   while (pos < manifestBody.size())
   {
     const size_t lineEnd = manifestBody.find('\n', pos);
-    const std::string line = Trim(manifestBody.substr(pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos));
+    const std::string line = Utils::Trim(manifestBody.substr(pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos));
     pos = lineEnd == std::string::npos ? manifestBody.size() : lineEnd + 1;
 
     if (line.rfind("#EXT-X-STREAM-INF", 0) != 0)
@@ -170,12 +126,12 @@ std::string FirstVariantPlaylistUrl(const std::string& manifestBody, const std::
     while (pos < manifestBody.size())
     {
       const size_t uriEnd = manifestBody.find('\n', pos);
-      const std::string uri = Trim(manifestBody.substr(pos, uriEnd == std::string::npos ? std::string::npos : uriEnd - pos));
+      const std::string uri = Utils::Trim(manifestBody.substr(pos, uriEnd == std::string::npos ? std::string::npos : uriEnd - pos));
       pos = uriEnd == std::string::npos ? manifestBody.size() : uriEnd + 1;
       if (uri.empty() || uri[0] == '#')
         continue;
 
-      return ResolvePlaylistUrl(baseUrl, uri);
+      return Utils::ResolvePlaylistUrl(baseUrl, uri);
     }
   }
 
@@ -192,13 +148,13 @@ std::vector<std::string> ExtractMediaSegmentUrls(const std::string& playlistBody
   {
     const size_t lineEnd = playlistBody.find('\n', pos);
     const std::string line =
-        Trim(playlistBody.substr(pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos));
+        Utils::Trim(playlistBody.substr(pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos));
     pos = lineEnd == std::string::npos ? playlistBody.size() : lineEnd + 1;
 
     if (line.empty() || line[0] == '#')
       continue;
 
-    urls.emplace_back(ResolvePlaylistUrl(baseUrl, line));
+    urls.emplace_back(Utils::ResolvePlaylistUrl(baseUrl, line));
   }
 
   return urls;
@@ -319,7 +275,8 @@ std::string aes_encrypt_cbc(const std::string &iv_str, const std::string &key, c
     return std::string(reinterpret_cast<const char*>(hexarray), dlenu);
 }
 
-bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc)
+bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc,
+                          bool showErrorDialog)
 {
   int statusCode = 0;
   std::string result;
@@ -340,7 +297,7 @@ bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapid
               url.c_str(), body.size(), result.size(), doc.GetParseError(), statusCode);
     if (!result.empty())
       kodi::Log(ADDON_LOG_DEBUG, "JSON failure response preview: %s", PreviewForLog(result).c_str());
-    if (!doc.GetParseError())
+    if (showErrorDialog && !doc.GetParseError())
     {
       if (doc.HasMember("error") && doc.HasMember("errorMessage"))
       {
@@ -1399,6 +1356,33 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
 
   kodi::Log(ADDON_LOG_DEBUG, "Encrypted Stream URL -> %s", result.url.c_str());
 
+  const int ffmpegdirectQuality = m_settings->GetFfmpegdirectQuality();
+  if (m_settings->GetInputstream() == INPUTSTREAM_FFMPEGDIRECT && ffmpegdirectQuality != 0)
+  {
+    // ffmpegdirect just opens whatever ffmpeg's HLS demuxer picks from the
+    // master playlist (effectively the first listed variant), with no
+    // bandwidth-aware selection at all. To pin a specific quality instead,
+    // fetch the master playlist ourselves and rewrite the stream URL to the
+    // chosen variant's own playlist URL directly.
+    Curl qualityCurl;
+    qualityCurl.AddHeader("User-Agent", EonParameters[m_platform].user_agent);
+    int qualityStatus = 0;
+    const std::string masterPlaylist = qualityCurl.Get(result.url, qualityStatus);
+    const std::string variantUrl =
+        Utils::SelectVariantPlaylistUrl(masterPlaylist, result.url, ffmpegdirectQuality);
+    if (!variantUrl.empty())
+    {
+      kodi::Log(ADDON_LOG_INFO, "ffmpegdirect quality override (%s) -> %s",
+                ffmpegdirectQuality == 1 ? "highest" : "lowest", variantUrl.c_str());
+      result.url = variantUrl;
+    }
+    else
+    {
+      kodi::Log(ADDON_LOG_ERROR,
+                "ffmpegdirect quality override requested but no variant found, using default URL");
+    }
+  }
+
   if (includeDiagnostics)
   {
     Curl manifestCurl;
@@ -2128,6 +2112,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
       sp.apiTimeUrl = m_api + "v1/time";
       sp.accessToken = m_settings->GetEonAccessToken();
       sp.userAgent = EonParameters[m_platform].user_agent;
+      sp.qualityPreference = m_settings->GetFfmpegdirectQuality();
 
       m_redirectProxy.Stop();
       m_redirectProxy.SetStreamParams(sp);
@@ -2203,8 +2188,12 @@ PVR_ERROR CPVREon::GetChannelStreamProperties(
                                  "?cid=" + std::to_string(addonChannel.iUniqueId) +
                                  "&fromTime=" + std::to_string(now) + "000" +
                                  "&toTime=" + std::to_string(now + 1) + "000";
+      // Best-effort only: already has a graceful fallback below (falls back
+      // to stream_mode=timeshift if this fails) -- a modal error dialog for
+      // a transient/unrelated backend hiccup on live channel tune-in would
+      // be a jarring false alarm, not something the user needs to act on.
       rapidjson::Document epgDoc;
-      if (GetPostJson(epgUrl, "", epgDoc))
+      if (GetPostJson(epgUrl, "", epgDoc, false))
       {
         const std::string cid = std::to_string(addonChannel.iUniqueId);
         if (epgDoc.HasMember(cid.c_str()) && epgDoc[cid.c_str()].IsArray() &&

@@ -348,7 +348,26 @@ std::string StreamRedirectProxy::BuildEncryptedUrl(time_t timestamp)
 
   const std::string ctime = FetchServerTime(params);
   const std::string sessionId = Utils::CreateUUID();
-  const std::string enc_url = BuildEncryptedUrlForSession(params, timestamp, ctime, sessionId);
+  std::string enc_url = BuildEncryptedUrlForSession(params, timestamp, ctime, sessionId);
+
+  if (params.qualityPreference != 0)
+  {
+    // Same rewrite as the initial (non-proxy) stream open: fetch the master
+    // playlist this URL points to and rewrite to the chosen variant's own
+    // playlist URL, so a pinned quality survives every seek too.
+    Curl qualityCurl;
+    if (!params.userAgent.empty())
+      qualityCurl.AddHeader("User-Agent", params.userAgent);
+    int qualityStatus = 0;
+    const std::string masterPlaylist = qualityCurl.Get(enc_url, qualityStatus);
+    const std::string variantUrl =
+        Utils::SelectVariantPlaylistUrl(masterPlaylist, enc_url, params.qualityPreference);
+    if (!variantUrl.empty())
+      enc_url = variantUrl;
+    else
+      kodi::Log(ADDON_LOG_ERROR,
+                "StreamRedirectProxy: quality override requested but no variant found, using default URL");
+  }
 
   kodi::Log(ADDON_LOG_DEBUG, "StreamRedirectProxy: t=%lld -> %s",
             static_cast<long long>(timestamp), enc_url.c_str());

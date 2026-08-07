@@ -21,6 +21,8 @@ public:
   const int& GetEonServiceProvider() const { return m_eonServiceProvider; }
   const int& GetPlatform() const { return m_eonPlatform; }
   const int& GetInputstream() const { return m_eonInputstream; }
+  // 0 = default (let ffmpegdirect/ffmpeg pick), 1 = highest bitrate, 2 = lowest bitrate.
+  const int& GetFfmpegdirectQuality() const { return m_eonFfmpegdirectQuality; }
   const int& GetAgeRating() const { return m_eonAgeRating; }
   const std::string& GetEonUsername() const { return m_eonUsername; }
   const std::string& GetEonPassword() const { return m_eonPassword; }
@@ -48,6 +50,7 @@ private:
   int m_eonServiceProvider;
   int m_eonPlatform;
   int m_eonInputstream;
+  int m_eonFfmpegdirectQuality;
   int m_eonAgeRating;
   std::string m_eonUsername;
   std::string m_eonPassword;
