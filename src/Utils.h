@@ -26,4 +26,13 @@ public:
   static bool JsonBoolOrFalse(const rapidjson::Value& jsonValue, const char* fieldName);
   static std::string CreateUUID();
   static bool CheckInputstreamInstalledAndEnabled(const std::string& inputstreamName);
+  static std::string Trim(const std::string& value);
+  static std::string ResolvePlaylistUrl(const std::string& baseUrl, const std::string& childUrl);
+  // Picks the #EXT-X-STREAM-INF variant with the highest (preference=1) or
+  // lowest (preference=2) BANDWIDTH attribute from an HLS master playlist.
+  // preference=0 (default) always returns "", meaning "don't override -- let
+  // ffmpeg pick", since that's a no-op the caller should recognize and skip.
+  static std::string SelectVariantPlaylistUrl(const std::string& manifestBody,
+                                               const std::string& baseUrl,
+                                               int preference);
 };

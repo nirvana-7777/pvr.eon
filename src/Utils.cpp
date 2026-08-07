@@ -264,3 +264,132 @@ bool Utils::CheckInputstreamInstalledAndEnabled(const std::string& inputstreamNa
 
   return true;
 }
+
+std::string Utils::Trim(const std::string& value)
+{
+  size_t end = value.size();
+  while (end > 0 && (value[end - 1] == '\r' || value[end - 1] == '\n' ||
+                      value[end - 1] == ' ' || value[end - 1] == '\t'))
+    --end;
+
+  size_t start = 0;
+  while (start < end && (value[start] == ' ' || value[start] == '\t'))
+    ++start;
+
+  return value.substr(start, end - start);
+}
+
+std::string Utils::ResolvePlaylistUrl(const std::string& baseUrl, const std::string& childUrl)
+{
+  if (childUrl.empty())
+    return "";
+
+  if (childUrl.rfind("https://", 0) == 0 || childUrl.rfind("http://", 0) == 0)
+    return childUrl;
+
+  const size_t schemePos = baseUrl.find("://");
+  if (schemePos == std::string::npos)
+    return childUrl;
+
+  const std::string scheme = baseUrl.substr(0, schemePos);
+  const size_t authorityStart = schemePos + 3;
+  const size_t pathStart = baseUrl.find('/', authorityStart);
+  const std::string authority = pathStart == std::string::npos
+                                    ? baseUrl.substr(authorityStart)
+                                    : baseUrl.substr(authorityStart, pathStart - authorityStart);
+
+  if (childUrl.rfind("//", 0) == 0)
+    return scheme + ":" + childUrl;
+
+  if (childUrl.front() == '/')
+    return scheme + "://" + authority + childUrl;
+
+  const size_t lastSlash = baseUrl.rfind('/');
+  if (lastSlash == std::string::npos || lastSlash < authorityStart)
+    return scheme + "://" + authority + "/" + childUrl;
+
+  return baseUrl.substr(0, lastSlash + 1) + childUrl;
+}
+
+namespace
+{
+long long BandwidthFromStreamInfLine(const std::string& line)
+{
+  const std::string key = "BANDWIDTH=";
+  const size_t keyPos = line.find(key);
+  if (keyPos == std::string::npos)
+    return -1;
+
+  size_t digitsStart = keyPos + key.size();
+  size_t digitsEnd = digitsStart;
+  while (digitsEnd < line.size() && isdigit(static_cast<unsigned char>(line[digitsEnd])))
+    ++digitsEnd;
+
+  if (digitsEnd == digitsStart)
+    return -1;
+
+  try
+  {
+    return std::stoll(line.substr(digitsStart, digitsEnd - digitsStart));
+  }
+  catch (...)
+  {
+    return -1;
+  }
+}
+} // namespace
+
+std::string Utils::SelectVariantPlaylistUrl(const std::string& manifestBody,
+                                             const std::string& baseUrl,
+                                             int preference)
+{
+  if (preference != 1 && preference != 2)
+    return "";
+
+  long long bestBandwidth = -1;
+  std::string bestUri;
+
+  size_t pos = 0;
+  while (pos < manifestBody.size())
+  {
+    const size_t lineEnd = manifestBody.find('\n', pos);
+    const std::string line = Trim(manifestBody.substr(pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos));
+    pos = lineEnd == std::string::npos ? manifestBody.size() : lineEnd + 1;
+
+    if (line.rfind("#EXT-X-STREAM-INF", 0) != 0)
+      continue;
+
+    const long long bandwidth = BandwidthFromStreamInfLine(line);
+
+    std::string uri;
+    while (pos < manifestBody.size())
+    {
+      const size_t uriEnd = manifestBody.find('\n', pos);
+      uri = Trim(manifestBody.substr(pos, uriEnd == std::string::npos ? std::string::npos : uriEnd - pos));
+      pos = uriEnd == std::string::npos ? manifestBody.size() : uriEnd + 1;
+      if (uri.empty() || uri[0] == '#')
+      {
+        uri.clear();
+        continue;
+      }
+      break;
+    }
+
+    if (uri.empty() || bandwidth < 0)
+      continue;
+
+    const bool isBetter = bestBandwidth < 0 ||
+                           (preference == 1 && bandwidth > bestBandwidth) ||
+                           (preference == 2 && bandwidth < bestBandwidth);
+    if (isBetter)
+    {
+      bestBandwidth = bandwidth;
+      bestUri = uri;
+    }
+  }
+
+  if (bestUri.empty())
+    return "";
+
+  return ResolvePlaylistUrl(baseUrl, bestUri);
+}

@@ -20,6 +20,7 @@
 #include <kodi/General.h>
 #include <kodi/gui/dialogs/OK.h>
 #include "Utils.h"
+#include "Crypto.h"
 #include "rapidjson/document.h"
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
@@ -110,57 +111,13 @@ size_t CountOccurrences(const std::string& haystack, const std::string& needle)
   return count;
 }
 
-std::string Trim(std::string value)
-{
-  while (!value.empty() && (value.back() == '\r' || value.back() == '\n' || value.back() == ' ' || value.back() == '\t'))
-    value.pop_back();
-
-  size_t start = 0;
-  while (start < value.size() && (value[start] == ' ' || value[start] == '\t'))
-    ++start;
-
-  return value.substr(start);
-}
-
-std::string ResolvePlaylistUrl(const std::string& baseUrl, const std::string& childUrl)
-{
-  if (childUrl.empty())
-    return "";
-
-  if (childUrl.rfind("https://", 0) == 0 || childUrl.rfind("http://", 0) == 0)
-    return childUrl;
-
-  const size_t schemePos = baseUrl.find("://");
-  if (schemePos == std::string::npos)
-    return childUrl;
-
-  const std::string scheme = baseUrl.substr(0, schemePos);
-  const size_t authorityStart = schemePos + 3;
-  const size_t pathStart = baseUrl.find('/', authorityStart);
-  const std::string authority = pathStart == std::string::npos
-                                    ? baseUrl.substr(authorityStart)
-                                    : baseUrl.substr(authorityStart, pathStart - authorityStart);
-
-  if (childUrl.rfind("//", 0) == 0)
-    return scheme + ":" + childUrl;
-
-  if (childUrl.front() == '/')
-    return scheme + "://" + authority + childUrl;
-
-  const size_t lastSlash = baseUrl.rfind('/');
-  if (lastSlash == std::string::npos || lastSlash < authorityStart)
-    return scheme + "://" + authority + "/" + childUrl;
-
-  return baseUrl.substr(0, lastSlash + 1) + childUrl;
-}
-
 std::string FirstVariantPlaylistUrl(const std::string& manifestBody, const std::string& baseUrl)
 {
   size_t pos = 0;
   while (pos < manifestBody.size())
   {
     const size_t lineEnd = manifestBody.find('\n', pos);
-    const std::string line = Trim(manifestBody.substr(pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos));
+    const std::string line = Utils::Trim(manifestBody.substr(pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos));
     pos = lineEnd == std::string::npos ? manifestBody.size() : lineEnd + 1;
 
     if (line.rfind("#EXT-X-STREAM-INF", 0) != 0)
@@ -169,12 +126,12 @@ std::string FirstVariantPlaylistUrl(const std::string& manifestBody, const std::
     while (pos < manifestBody.size())
     {
       const size_t uriEnd = manifestBody.find('\n', pos);
-      const std::string uri = Trim(manifestBody.substr(pos, uriEnd == std::string::npos ? std::string::npos : uriEnd - pos));
+      const std::string uri = Utils::Trim(manifestBody.substr(pos, uriEnd == std::string::npos ? std::string::npos : uriEnd - pos));
       pos = uriEnd == std::string::npos ? manifestBody.size() : uriEnd + 1;
       if (uri.empty() || uri[0] == '#')
         continue;
 
-      return ResolvePlaylistUrl(baseUrl, uri);
+      return Utils::ResolvePlaylistUrl(baseUrl, uri);
     }
   }
 
@@ -191,13 +148,13 @@ std::vector<std::string> ExtractMediaSegmentUrls(const std::string& playlistBody
   {
     const size_t lineEnd = playlistBody.find('\n', pos);
     const std::string line =
-        Trim(playlistBody.substr(pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos));
+        Utils::Trim(playlistBody.substr(pos, lineEnd == std::string::npos ? std::string::npos : lineEnd - pos));
     pos = lineEnd == std::string::npos ? playlistBody.size() : lineEnd + 1;
 
     if (line.empty() || line[0] == '#')
       continue;
 
-    urls.emplace_back(ResolvePlaylistUrl(baseUrl, line));
+    urls.emplace_back(Utils::ResolvePlaylistUrl(baseUrl, line));
   }
 
   return urls;
@@ -318,7 +275,8 @@ std::string aes_encrypt_cbc(const std::string &iv_str, const std::string &key, c
     return std::string(reinterpret_cast<const char*>(hexarray), dlenu);
 }
 
-bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc)
+bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc,
+                          bool showErrorDialog)
 {
   int statusCode = 0;
   std::string result;
@@ -339,7 +297,7 @@ bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapid
               url.c_str(), body.size(), result.size(), doc.GetParseError(), statusCode);
     if (!result.empty())
       kodi::Log(ADDON_LOG_DEBUG, "JSON failure response preview: %s", PreviewForLog(result).c_str());
-    if (!doc.GetParseError())
+    if (showErrorDialog && !doc.GetParseError())
     {
       if (doc.HasMember("error") && doc.HasMember("errorMessage"))
       {
@@ -1127,7 +1085,9 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
                                   const bool& playTimeshiftBuffer,
                                   const bool& isLive,
                                   time_t starttime,
-                                  time_t endtime)
+                                  time_t endtime,
+                                  bool catchupProxyReady,
+                                  bool playForwardIndefinitely)
 {
   kodi::Log(ADDON_LOG_DEBUG,
             "[PLAY STREAM] url=%s realtime=%s playTimeshiftBuffer=%s mode=%s start=%lld end=%lld",
@@ -1138,10 +1098,36 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
             static_cast<long long>(starttime),
             static_cast<long long>(endtime));
 
-  properties.emplace_back(PVR_STREAM_PROPERTY_STREAMURL, url);
-  properties.emplace_back(PVR_STREAM_PROPERTY_ISREALTIMESTREAM, realtime ? "true" : "false");
-
   int inputstream = m_settings->GetInputstream();
+
+  // Live uses the catchup seek proxy under the same condition GetStreamProperties
+  // used to decide whether to start it (see there) -- both must agree on this to
+  // stay in sync, so recompute rather than trust catchupProxyReady on its own.
+  const bool useCatchup =
+      catchupProxyReady && endtime > starttime && inputstream == INPUTSTREAM_FFMPEGDIRECT;
+
+  // inputstream.ffmpegdirect uses ffmpeg's own real-time-pacing playback loop
+  // whenever is_realtime_stream=true, which paces/tracks time by wall clock
+  // rather than by demuxed PTS -- appropriate for the old timeshift-only live
+  // path, but it fights a seek: after rewinding via catchup, the position
+  // Kodi displays (and computes further seeks from) keeps drifting back
+  // towards "now" instead of holding at the seeked point. Replay already
+  // avoids this by using realtime=false; do the same whenever live also
+  // plays through catchup mode, matching the case that's proven to work.
+  const bool effectiveRealtime = useCatchup ? false : realtime;
+
+  // inputstream.ffmpegdirect uses ffmpeg's native HTTP client for the
+  // actual stream fetch, not Kodi's own CURL layer. Unlike
+  // inputstream.adaptive (configured below via manifest_headers), it only
+  // picks up a custom User-Agent via Kodi's "|key=value" URL suffix
+  // convention -- without it, ffmpeg falls back to Kodi's generic default
+  // UA, which gets blocked by the CDN the same way issue #16 describes.
+  std::string streamUrlForProperty = url;
+  if (inputstream == INPUTSTREAM_FFMPEGDIRECT)
+    streamUrlForProperty += "|User-Agent=" + Utils::UrlEncode(EonParameters[m_platform].user_agent);
+
+  properties.emplace_back(PVR_STREAM_PROPERTY_STREAMURL, streamUrlForProperty);
+  properties.emplace_back(PVR_STREAM_PROPERTY_ISREALTIMESTREAM, effectiveRealtime ? "true" : "false");
 
   if (inputstream == INPUTSTREAM_ADAPTIVE)
   {
@@ -1171,9 +1157,57 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
     kodi::Log(ADDON_LOG_DEBUG, "...using inputstream.ffmpegdirect");
     properties.emplace_back(PVR_STREAM_PROPERTY_INPUTSTREAM, "inputstream.ffmpegdirect");
     properties.emplace_back("inputstream.ffmpegdirect.manifest_type", "hls");
-    properties.emplace_back("inputstream.ffmpegdirect.is_realtime_stream", realtime ? "true" : "false");
-    if (isLive)
+    properties.emplace_back("inputstream.ffmpegdirect.is_realtime_stream", effectiveRealtime ? "true" : "false");
+    if (useCatchup)
     {
+      // Seek via the local redirect proxy: it mints a fresh, correctly
+      // timestamped/encrypted URL for each seek target, which ffmpegdirect's
+      // plain {utc} substitution can't do on its own (see StreamRedirectProxy).
+      // Used for live too (not just replay): a live channel's currently
+      // airing programme is just a "replay" whose end time is still in the
+      // future, and this lets the user rewind into it -- ffmpegdirect's
+      // stream_mode=timeshift alternative can only rewind into its local
+      // on-disk buffer, which starts empty at tune-in and has nothing from
+      // before that moment. playback_as_live=true keeps the seekable end
+      // growing with real time instead of capping it at the programme's
+      // (possibly still in the future) end time.
+      properties.emplace_back("inputstream.ffmpegdirect.stream_mode", "catchup");
+      // playForwardIndefinitely: a specific past programme resumed via the
+      // EPGPLAYBACKASLIVE hand-off (see GetChannelStreamProperties) -- it
+      // must start at ITS OWN beginning (isLive=false keeps BuildPlaybackUrl
+      // and catchup_buffer_offset targeting starttime, not "now"), but the
+      // underlying feed keeps extending past this programme's nominal end
+      // into whatever airs next, so the seekable end needs to keep growing
+      // with real time exactly like live does, not freeze at endtime.
+      properties.emplace_back("inputstream.ffmpegdirect.playback_as_live",
+                               (isLive || playForwardIndefinitely) ? "true" : "false");
+      properties.emplace_back("inputstream.ffmpegdirect.programme_start_time", std::to_string(starttime));
+      properties.emplace_back("inputstream.ffmpegdirect.programme_end_time", std::to_string(endtime));
+      properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_start_time", std::to_string(starttime));
+      properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_end_time", std::to_string(endtime));
+      if (isLive)
+      {
+        // Without this, ffmpegdirect defaults catchup_buffer_offset to 0,
+        // i.e. the start of the buffer -- fine for replay (selecting a past
+        // programme is expected to start at its beginning), but tuning
+        // into a live channel would then start playback at the beginning
+        // of whatever show happens to be airing instead of at "now".
+        const time_t now = time(nullptr);
+        const int64_t liveOffset = std::max<int64_t>(now - starttime, 0);
+        properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_offset", std::to_string(liveOffset));
+      }
+      kodi::Log(ADDON_LOG_INFO,
+                "Using ffmpegdirect catchup %s mode with seek proxy. start=%lld end=%lld",
+                isLive ? "live" : "replay",
+                static_cast<long long>(starttime),
+                static_cast<long long>(endtime));
+    }
+    else if (isLive)
+    {
+      // No usable programme window (EPG lookup failed) or the proxy failed
+      // to start: fall back to ffmpegdirect's local timeshift buffer, which
+      // still allows rewinding into whatever has been buffered since
+      // tune-in even though it can't reach further back into the show.
       properties.emplace_back("inputstream.ffmpegdirect.stream_mode", "timeshift");
     }
     else
@@ -1255,6 +1289,8 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
               isLive ? "live" : "timeshift", channel.iUniqueId);
     return false;
   }
+  result.serverIp = currentServer.ip;
+  result.serverHostname = currentServer.hostname;
 
   std::string plain_aes;
   const bool use_adaptive_stream_hint =
@@ -1329,14 +1365,42 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
 
   kodi::Log(ADDON_LOG_DEBUG, "Encrypted Stream URL -> %s", result.url.c_str());
 
-  if (includeDiagnostics && !isLive)
+  const int ffmpegdirectQuality = m_settings->GetFfmpegdirectQuality();
+  if (m_settings->GetInputstream() == INPUTSTREAM_FFMPEGDIRECT && ffmpegdirectQuality != 0)
+  {
+    // ffmpegdirect just opens whatever ffmpeg's HLS demuxer picks from the
+    // master playlist (effectively the first listed variant), with no
+    // bandwidth-aware selection at all. To pin a specific quality instead,
+    // fetch the master playlist ourselves and rewrite the stream URL to the
+    // chosen variant's own playlist URL directly.
+    Curl qualityCurl;
+    qualityCurl.AddHeader("User-Agent", EonParameters[m_platform].user_agent);
+    int qualityStatus = 0;
+    const std::string masterPlaylist = qualityCurl.Get(result.url, qualityStatus);
+    const std::string variantUrl =
+        Utils::SelectVariantPlaylistUrl(masterPlaylist, result.url, ffmpegdirectQuality);
+    if (!variantUrl.empty())
+    {
+      kodi::Log(ADDON_LOG_INFO, "ffmpegdirect quality override (%s) -> %s",
+                ffmpegdirectQuality == 1 ? "highest" : "lowest", variantUrl.c_str());
+      result.url = variantUrl;
+    }
+    else
+    {
+      kodi::Log(ADDON_LOG_ERROR,
+                "ffmpegdirect quality override requested but no variant found, using default URL");
+    }
+  }
+
+  if (includeDiagnostics)
   {
     Curl manifestCurl;
     manifestCurl.AddHeader("User-Agent", EonParameters[m_platform].user_agent);
     int manifestStatus = 0;
     const std::string manifestBody = manifestCurl.Get(result.url, manifestStatus);
     kodi::Log(ADDON_LOG_INFO,
-              "Replay manifest fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
+              "%s manifest fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
+              isLive ? "Live" : "Replay",
               manifestStatus, manifestBody.size(), CountOccurrences(manifestBody, "#EXTINF"),
               BoolState(manifestBody.find("#EXT-X-ENDLIST") != std::string::npos),
               BoolState(manifestBody.find("#EXT-X-PLAYLIST-TYPE:VOD") != std::string::npos),
@@ -1349,7 +1413,8 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
       int variantStatus = 0;
       const std::string variantBody = manifestCurl.Get(variantUrl, variantStatus);
       kodi::Log(ADDON_LOG_INFO,
-                "Replay variant fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
+                "%s variant fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
+                isLive ? "Live" : "Replay",
                 variantStatus, variantBody.size(), CountOccurrences(variantBody, "#EXTINF"),
                 BoolState(variantBody.find("#EXT-X-ENDLIST") != std::string::npos),
                 BoolState(variantBody.find("#EXT-X-PLAYLIST-TYPE:VOD") != std::string::npos),
@@ -1815,8 +1880,12 @@ PVR_ERROR CPVREon::GetEPGForChannel(int channelUid,
                               "&fromTime=" + std::to_string(start) + "000" +
                               "&toTime=" + std::to_string(end) + "000";
 
+    // Kodi calls this in the background to populate the EPG grid, often for
+    // many channels back-to-back (e.g. at startup) -- a modal error dialog
+    // per failed channel would be extremely disruptive. One channel's EPG
+    // failing isn't fatal: Kodi just shows no EPG data for it and moves on.
     rapidjson::Document epgDoc;
-    if (!GetPostJson(url, "", epgDoc)) {
+    if (!GetPostJson(url, "", epgDoc, false)) {
       kodi::Log(ADDON_LOG_ERROR, "[GetEPG] ERROR: error while parsing json");
       return PVR_ERROR_SERVER_ERROR;
     }
@@ -1951,7 +2020,23 @@ PVR_ERROR CPVREon::GetEPGTagStreamProperties(
         return PVR_ERROR_NO_ERROR;
       }
 
-      return GetStreamProperties(channel, properties, tag.GetStartTime(), tag.GetEndTime(), false);
+      // EON's replay/catchup manifest never sets #EXT-X-ENDLIST -- it's a
+      // continuously-extending feed, not a finite recording, so playback
+      // just carries on into whatever airs next on the channel once this
+      // programme's nominal end time passes. Kodi only tracks title/EPG
+      // info dynamically for channel-type playback sessions (a fixed
+      // EPG-tag session stays pinned to this tag for its whole lifetime,
+      // by design) -- so hand this off as EPGPLAYBACKASLIVE and stash the
+      // actual requested start/end time for GetChannelStreamProperties to
+      // pick up, since Kodi discards whatever we return here and reopens
+      // via the channel path instead, which otherwise defaults to "now".
+      m_pendingReplayAsLive.active = true;
+      m_pendingReplayAsLive.channelUid = channel.iUniqueId;
+      m_pendingReplayAsLive.startTime = tag.GetStartTime();
+      m_pendingReplayAsLive.endTime = tag.GetEndTime();
+      m_pendingReplayAsLive.requestTime = time(nullptr);
+      properties.emplace_back(PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE, "true");
+      return PVR_ERROR_NO_ERROR;
     }
   }
   return PVR_ERROR_NO_ERROR;
@@ -2012,7 +2097,8 @@ PVR_ERROR CPVREon::GetStreamProperties(
     std::vector<kodi::addon::PVRStreamProperty>& properties,
     time_t starttime,
     time_t endtime,
-    const bool& isLive)
+    const bool& isLive,
+    bool playForwardIndefinitely)
 {
     kodi::Log(ADDON_LOG_DEBUG,
               "function call: [%s] channel=%s uid=%i mode=%s start=%lld end=%lld",
@@ -2026,7 +2112,77 @@ PVR_ERROR CPVREon::GetStreamProperties(
     if (!BuildPlaybackUrl(channel, starttime, endtime, isLive, playback, true))
       return PVR_ERROR_SERVER_ERROR;
 
-    SetStreamProperties(properties, playback.url, isLive, false, isLive, starttime, endtime);
+    bool catchupProxyReady = false;
+    if (endtime > starttime && m_settings->GetInputstream() == INPUTSTREAM_FFMPEGDIRECT)
+    {
+      // Reuse the exact server BuildPlaybackUrl already picked for the
+      // original URL. Calling GetServer() again here independently can
+      // return a different edge node (the underlying server list isn't
+      // guaranteed stable across calls), which desyncs the proxy's seek
+      // URLs from the session's actual edge server and gets them rejected.
+      StreamParams sp;
+      sp.publishingPoint = channel.publishingPoints[0].publishingPoint;
+      sp.streamingProfile = playback.streamProfile;
+      sp.serviceProvider = m_service_provider;
+      sp.streamUser = m_settings->GetEonStreamUser();
+      sp.streamKey = m_settings->GetEonStreamKey();
+      sp.serverIp = playback.serverIp;
+      sp.serverHostname = playback.serverHostname;
+      sp.deviceNumber = m_settings->GetEonDeviceNumber();
+      sp.sig = channel.sig;
+      sp.aaEnabled = channel.aaEnabled;
+      sp.platform = m_platform;
+      sp.maxBitrate = static_cast<unsigned int>(playback.bitrate);
+      // The CDN rejects a stale ctime (>~20s old), so the proxy fetches
+      // this fresh for every seek rather than relying on a cached offset.
+      sp.apiTimeUrl = m_api + "v1/time";
+      sp.accessToken = m_settings->GetEonAccessToken();
+      sp.userAgent = EonParameters[m_platform].user_agent;
+      sp.qualityPreference = m_settings->GetFfmpegdirectQuality();
+
+      m_redirectProxy.Stop();
+      m_redirectProxy.SetStreamParams(sp);
+      catchupProxyReady = m_redirectProxy.Start();
+      if (!catchupProxyReady)
+        kodi::Log(ADDON_LOG_ERROR,
+                  "Failed to start seek redirect proxy, falling back to %s",
+                  isLive ? "local timeshift buffer only (no rewind into the show)"
+                         : "simplified replay mode");
+    }
+
+    // Also true for a resumed past programme (see GetChannelStreamProperties's
+    // EPGPLAYBACKASLIVE hand-off): its underlying feed keeps extending past
+    // its own nominal end too, so ffmpegdirect's own accurate, growing
+    // catchup-mode times are the correct source for it as well.
+    m_live_using_catchup = (isLive || playForwardIndefinitely) && catchupProxyReady;
+
+    SetStreamProperties(properties, playback.url, isLive, false, isLive, starttime, endtime,
+                         catchupProxyReady, playForwardIndefinitely);
+
+    if (catchupProxyReady)
+    {
+      // Same "|User-Agent=..." suffix as the main streamurl property (see
+      // SetStreamProperties) -- ffmpegdirect re-parses protocol options
+      // from whichever URL becomes m_streamUrl, including the catchup
+      // format string and this fallback default_url, not just the initial
+      // PVR_STREAM_PROPERTY_STREAMURL.
+      const std::string uaSuffix = "|User-Agent=" + Utils::UrlEncode(EonParameters[m_platform].user_agent);
+      const std::string proxyBase = "http://127.0.0.1:" + std::to_string(m_redirectProxy.GetPort()) + "/stream?t=";
+      properties.emplace_back("inputstream.ffmpegdirect.catchup_url_format_string", proxyBase + "{utc}" + uaSuffix);
+      // ffmpegdirect falls back to default_url whenever a seek resolves close
+      // enough to live (see GetUpdatedCatchupUrl in its source). A static
+      // snapshot of the original playback.url would carry a ctime that's
+      // long expired by the time that actually happens -- the CDN rejects
+      // URLs whose embedded ctime is more than ~20s old (same issue seeking
+      // backward already had to solve). Route through the proxy so "back to
+      // live" always mints a fresh URL too, instead of only rewinding
+      // working reliably. t=0 is a sentinel the proxy treats as "build a
+      // genuine live URL" (no historical offset at all) rather than a
+      // catchup URL for "right now" -- confirmed on-device that requesting
+      // the replay/catchup endpoint for a moment that recent returns an
+      // immediate EOF instead of content, unlike a real live request.
+      properties.emplace_back("inputstream.ffmpegdirect.default_url", proxyBase + "0" + uaSuffix);
+    }
 
     for (auto& prop : properties)
         kodi::Log(ADDON_LOG_DEBUG, "Name: %s Value: %s", prop.GetName().c_str(), prop.GetValue().c_str());
@@ -2049,7 +2205,70 @@ PVR_ERROR CPVREon::GetChannelStreamProperties(
   EonChannel addonChannel;
   if (GetChannel(channel, addonChannel)) {
     if (addonChannel.subscribed) {
-      return GetStreamProperties(addonChannel, properties, 0, 0, true);
+      // Pick up a replay/catchup request handed off via
+      // GetEPGTagStreamProperties's EPGPLAYBACKASLIVE (see there) instead
+      // of defaulting to a normal live tune-in at "now".
+      const time_t pendingCheckNow = time(nullptr);
+      if (m_pendingReplayAsLive.active &&
+          m_pendingReplayAsLive.channelUid == addonChannel.iUniqueId &&
+          pendingCheckNow - m_pendingReplayAsLive.requestTime <= PENDING_PLAYBACK_TTL_SECONDS)
+      {
+        const time_t pendingStart = m_pendingReplayAsLive.startTime;
+        const time_t pendingEnd = m_pendingReplayAsLive.endTime;
+        m_pendingReplayAsLive = {};
+
+        m_stream_is_live = false;
+        m_stream_start_time = pendingStart;
+        m_stream_end_time = pendingEnd;
+
+        kodi::Log(ADDON_LOG_INFO,
+                  "Resuming handed-off replay via channel open. channelUid=%i start=%lld end=%lld",
+                  addonChannel.iUniqueId, static_cast<long long>(pendingStart),
+                  static_cast<long long>(pendingEnd));
+
+        // isLive=false: BuildPlaybackUrl and catchup_buffer_offset must
+        // target pendingStart, not "now" (that's the whole point of this
+        // hand-off). playForwardIndefinitely=true: still keep the seekable
+        // end growing with real time (see SetStreamProperties) so seeking
+        // doesn't break once playback continues past pendingEnd into
+        // whatever airs next.
+        return GetStreamProperties(addonChannel, properties, pendingStart, pendingEnd, false,
+                                    /*playForwardIndefinitely=*/true);
+      }
+      m_pendingReplayAsLive = {};
+
+      m_stream_is_live = true;
+      m_stream_start_time = 0;
+      m_stream_end_time = 0;
+
+      // Fetch the currently airing programme: its start/end time double as
+      // the catchup buffer bounds below, letting the user rewind into the
+      // show (not just what ffmpegdirect's local timeshift buffer has
+      // captured since tune-in), and as the progress bar range.
+      const time_t now = time(nullptr);
+      const std::string epgUrl = m_api + "v1/events/epg" +
+                                 "?cid=" + std::to_string(addonChannel.iUniqueId) +
+                                 "&fromTime=" + std::to_string(now) + "000" +
+                                 "&toTime=" + std::to_string(now + 1) + "000";
+      // Best-effort only: already has a graceful fallback below (falls back
+      // to stream_mode=timeshift if this fails) -- a modal error dialog for
+      // a transient/unrelated backend hiccup on live channel tune-in would
+      // be a jarring false alarm, not something the user needs to act on.
+      rapidjson::Document epgDoc;
+      if (GetPostJson(epgUrl, "", epgDoc, false))
+      {
+        const std::string cid = std::to_string(addonChannel.iUniqueId);
+        if (epgDoc.HasMember(cid.c_str()) && epgDoc[cid.c_str()].IsArray() &&
+            epgDoc[cid.c_str()].Size() > 0)
+        {
+          const rapidjson::Value& epgItem = epgDoc[cid.c_str()][0];
+          m_stream_start_time = (time_t)(Utils::JsonInt64OrZero(epgItem, "startTime") / 1000);
+          m_stream_end_time = (time_t)(Utils::JsonInt64OrZero(epgItem, "endTime") / 1000);
+        }
+      }
+
+      return GetStreamProperties(addonChannel, properties, m_stream_start_time, m_stream_end_time,
+                                  true);
     }
     kodi::Log(ADDON_LOG_DEBUG, "Channel not subscribed");
     return PVR_ERROR_SERVER_ERROR;
@@ -2295,7 +2514,43 @@ bool CPVREon::IsRealTimeStream()
 PVR_ERROR CPVREon::GetStreamTimes(kodi::addon::PVRStreamTimes& times)
 {
   if (!UseExperimentalNativeStream() || !m_nativeStream.open)
-    return PVR_ERROR_NOT_IMPLEMENTED;
+  {
+    // Standard (non-native-stream) playback. Live, and a resumed past
+    // programme handed off via EPGPLAYBACKASLIVE, both normally play
+    // through the same inputstream.ffmpegdirect catchup mode as replay
+    // (see SetStreamProperties), which has its own accurate, seek-aware,
+    // growing GetTimes() -- reporting our own fixed/real-time estimate
+    // here as well fights it: after a seek (or once playback continues
+    // past this programme's own end), the demuxer's real position no
+    // longer matches what we'd compute, but this function would keep
+    // reporting the latter, overriding the correct value with a stale one.
+    // m_live_using_catchup is only true when that catchup mode actually
+    // started; if it didn't (EPG lookup or proxy start failed, so live fell
+    // back to plain stream_mode=timeshift), ffmpegdirect's own times only
+    // cover its local buffer since tune-in, not the programme -- so keep
+    // reporting our own estimate there, same as plain replay/catchup, which
+    // ffmpegdirect can't infer on its own either.
+    if (m_live_using_catchup || m_stream_start_time <= 0 ||
+        m_stream_end_time <= m_stream_start_time)
+      return PVR_ERROR_NOT_IMPLEMENTED;
+
+    times.SetPTSStart(0);
+    times.SetPTSBegin(0);
+    if (m_stream_is_live)
+    {
+      const time_t now = time(nullptr);
+      const int64_t elapsed = std::max<int64_t>(now - m_stream_start_time, 0);
+      times.SetStartTime(m_stream_start_time);
+      times.SetPTSEnd(elapsed * PVR_TIME_BASE);
+    }
+    else
+    {
+      const int64_t duration = m_stream_end_time - m_stream_start_time;
+      times.SetStartTime(m_stream_start_time);
+      times.SetPTSEnd(duration * PVR_TIME_BASE);
+    }
+    return PVR_ERROR_NO_ERROR;
+  }
 
   if (m_nativeStream.isLive)
   {

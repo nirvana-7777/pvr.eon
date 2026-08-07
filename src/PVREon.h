@@ -12,6 +12,7 @@
 
 #include <kodi/addon-instance/PVR.h>
 #include "Settings.h"
+#include "StreamRedirectProxy.h"
 #include "http/HttpClient.h"
 #include "rapidjson/document.h"
 
@@ -119,6 +120,25 @@ struct EonPendingPlayback
   time_t requestTime = 0;
 };
 
+// Hand-off for the standard (non-native, ffmpegdirect) playback path: Kodi's
+// PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE makes it open a channel FileItem
+// instead of a fixed EPG-tag one, so its title/progress tracking follows
+// the channel's real current EPG event dynamically instead of staying
+// pinned to whatever was selected -- but that means Kodi immediately
+// re-invokes GetChannelStreamProperties instead of using anything we
+// returned from GetEPGTagStreamProperties, discarding the specific past
+// start/end time the user actually selected. This carries it across that
+// hand-off so GetChannelStreamProperties can still start the stream at the
+// right point instead of "now".
+struct EonPendingReplayAsLive
+{
+  bool active = false;
+  int channelUid = 0;
+  time_t startTime = 0;
+  time_t endTime = 0;
+  time_t requestTime = 0;
+};
+
 struct EonNativeStreamState
 {
   bool open = false;
@@ -211,6 +231,8 @@ private:
     std::string url;
     std::string streamProfile;
     int bitrate = 0;
+    std::string serverIp;
+    std::string serverHostname;
   };
 
   void SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,
@@ -219,7 +241,9 @@ private:
                            const bool& playTimeshiftBuffer,
                            const bool& isLive,
                            time_t starttime,
-                           time_t endtime);
+                           time_t endtime,
+                           bool catchupProxyReady,
+                           bool playForwardIndefinitely = false);
   bool BuildPlaybackUrl(const EonChannel& channel,
                         time_t starttime,
                         time_t endtime,
@@ -249,7 +273,8 @@ private:
     std::vector<kodi::addon::PVRStreamProperty>& properties,
     time_t starttime,
     time_t endtime,
-    const bool& isLive);
+    const bool& isLive,
+    bool playForwardIndefinitely = false);
 
   std::vector<EonChannel> m_channels;
   std::vector<EonServer> m_live_servers;
@@ -273,6 +298,20 @@ private:
   std::string m_session_id;
   std::string m_stream_key;
   std::string m_stream_un;
+
+  // Currently playing programme, tracked for GetStreamTimes() (progress
+  // bar / timeline) on the standard (non-native-stream) playback path.
+  time_t m_stream_start_time = 0;
+  time_t m_stream_end_time = 0;
+  bool m_stream_is_live = false;
+  // True when the current live channel is playing through the catchup seek
+  // proxy (see SetStreamProperties); false when it fell back to plain
+  // stream_mode=timeshift (EPG lookup or proxy start failure). GetStreamTimes()
+  // uses this to know whether ffmpegdirect already reports accurate times on
+  // its own (catchup) or whether it still needs our own estimate (timeshift).
+  bool m_live_using_catchup = false;
+  StreamRedirectProxy m_redirectProxy;
+
   std::string m_service_provider;
   std::string m_support_web;
 //  std::string m_ss_access;
@@ -282,6 +321,7 @@ private:
   std::string m_images_api;
   int m_platform;
   EonPendingPlayback m_pendingPlayback;
+  EonPendingReplayAsLive m_pendingReplayAsLive;
   EonNativeStreamState m_nativeStream;
 
 //  std::string m_ss_refresh;
@@ -293,7 +333,8 @@ private:
 
   std::string GetTime();
   int getBitrate(const bool isRadio, const int id);
-  bool GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc);
+  bool GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc,
+                    bool showErrorDialog = true);
   std::string getCoreStreamId(const int id);
   std::string GetBaseApi(const std::string& cdn_identifier);
   std::string GetBrandIdentifier();

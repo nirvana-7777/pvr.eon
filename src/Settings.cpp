@@ -177,6 +177,13 @@ bool CSettings::Load()
     return false;
   }
 
+  if (!kodi::addon::CheckSettingInt("ffmpegdirectquality", m_eonFfmpegdirectQuality))
+  {
+    /* If setting is unknown fallback to defaults */
+    kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'ffmpegdirectquality' setting");
+    return false;
+  }
+
   if (!kodi::addon::CheckSettingInt("agerating", m_eonAgeRating))
   {
     /* If setting is unknown fallback to defaults */

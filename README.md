@@ -66,6 +66,9 @@ For older Android Kodi builds, you can match the Kodi tag and Android NDK used b
 - Tested building it for Linux `x86_64`, Linux `armv7`, Linux `aarch64`, Android `armv7`, and Android `aarch64`
 - Only tested Telemach.ba, but other should work as well or should be easy to fix
 - Depends on inputstream addon
+- **For seeking/rewind (live TV and replay/catchup) to work**, set the addon's
+  "Select Inputstream" setting to `inputstream.ffmpegdirect` -- it defaults to
+  `inputstream.adaptive`, which doesn't support seeking with this addon
 - Standard inputstream-based Replay TV still behaves like a short rolling live HLS window on EON/Vivacom, so full seek/rewind is limited there
 - `Experimental native archive streaming` adds working archive seek support for finished replay programmes and for `EPG -> Play programme` on already-started events
 - Direct live channel `Switch` still uses the standard live playback path and does not yet expose the native archive/timeshift behavior
