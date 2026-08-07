@@ -283,6 +283,12 @@ private:
   time_t m_stream_start_time = 0;
   time_t m_stream_end_time = 0;
   bool m_stream_is_live = false;
+  // True when the current live channel is playing through the catchup seek
+  // proxy (see SetStreamProperties); false when it fell back to plain
+  // stream_mode=timeshift (EPG lookup or proxy start failure). GetStreamTimes()
+  // uses this to know whether ffmpegdirect already reports accurate times on
+  // its own (catchup) or whether it still needs our own estimate (timeshift).
+  bool m_live_using_catchup = false;
   StreamRedirectProxy m_redirectProxy;
 
   std::string m_service_provider;

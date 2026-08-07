@@ -181,9 +181,13 @@ void StreamRedirectProxy::ServerThread()
     }
     buf[bytesRead] = '\0';
 
-    // Parse the timestamp from "GET /stream?t=<timestamp> HTTP/..."
+    // Parse the timestamp from "GET /stream?t=<timestamp> HTTP/...". t=0 is
+    // a sentinel meaning "live" (no historical offset at all) -- see
+    // BuildEncryptedUrlForSession, used for ffmpegdirect's default_url,
+    // which it falls back to whenever a seek resolves close enough to live.
     std::string request(buf);
     time_t timestamp = 0;
+    bool foundTimestamp = false;
 
     size_t tPos = request.find("t=");
     if (tPos != std::string::npos)
@@ -191,11 +195,15 @@ void StreamRedirectProxy::ServerThread()
       tPos += 2;
       size_t tEnd = request.find_first_of("& \r\n", tPos);
       std::string tStr = request.substr(tPos, tEnd - tPos);
-      try { timestamp = static_cast<time_t>(std::stoll(tStr)); }
-      catch (...) { timestamp = 0; }
+      try
+      {
+        timestamp = static_cast<time_t>(std::stoll(tStr));
+        foundTimestamp = timestamp >= 0;
+      }
+      catch (...) { foundTimestamp = false; }
     }
 
-    if (timestamp <= 0)
+    if (!foundTimestamp)
     {
       std::string response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
       send(clientSocket, response.c_str(), response.size(), 0);
@@ -249,6 +257,15 @@ namespace
 std::string BuildEncryptedUrlForSession(const StreamParams& params, time_t timestamp,
                                          const std::string& ctime, const std::string& sessionId)
 {
+  // t=0 is a sentinel for "live" -- requesting a historical/catchup URL for
+  // a timestamp that's essentially "right now" isn't equivalent to a real
+  // live request: the CDN's replay path returned an immediate EOF instead
+  // of content when tried (presumably an encoding/ingestion lag before
+  // "now" becomes available there). A genuine live request omits the "t="
+  // field entirely -- see BuildPlaybackUrl's isLive branch in PVREon.cpp,
+  // which this mirrors.
+  const bool isLiveRequest = timestamp <= 0;
+
   std::string plain_aes;
   if (params.platform == kAndroidTvPlatform)
   {
@@ -265,8 +282,9 @@ std::string BuildEncryptedUrlForSession(const StreamParams& params, time_t times
                 "minvbr=100;"
                 "ss=" + params.streamKey + ";"
                 "session=" + sessionId + ";"
-                "maxvbr=" + std::to_string(params.maxBitrate) +
-                ";t=" + std::to_string(static_cast<long long>(timestamp)) + "000;";
+                "maxvbr=" + std::to_string(params.maxBitrate) + ";";
+    if (!isLiveRequest)
+      plain_aes += "t=" + std::to_string(static_cast<long long>(timestamp)) + "000;";
   }
   else
   {
@@ -286,9 +304,10 @@ std::string BuildEncryptedUrlForSession(const StreamParams& params, time_t times
                 "device=" + params.deviceNumber + ";"
                 "ctime=" + ctime + ";"
                 "conn=" + kConnTypeBrowser + ";"
-                "player=" + kPlayer + ";"
-                "t=" + std::to_string(static_cast<long long>(timestamp)) + "000;"
-                "aa=" + (params.aaEnabled ? "true" : "false");
+                "player=" + kPlayer + ";";
+    if (!isLiveRequest)
+      plain_aes += "t=" + std::to_string(static_cast<long long>(timestamp)) + "000;";
+    plain_aes += std::string("aa=") + (params.aaEnabled ? "true" : "false");
   }
 
   const std::string key = base64_decode(urlsafedecode(params.streamKey));
