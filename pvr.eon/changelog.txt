@@ -1,3 +1,8 @@
+v21.8.0
+  - Add progress bar and timeline for live TV and replay/catchup playback
+  - Add seeking (fast-forward/rewind) for replay/catchup content
+  - Fix playback failures caused by the streaming CDN blocking the addon's
+    User-Agent, affecting both live TV and replay/catchup (#16)
 v21.7.11
   - Maintenance release
 v21.5.0

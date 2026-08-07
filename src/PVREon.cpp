@@ -1140,10 +1140,20 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
             static_cast<long long>(starttime),
             static_cast<long long>(endtime));
 
-  properties.emplace_back(PVR_STREAM_PROPERTY_STREAMURL, url);
-  properties.emplace_back(PVR_STREAM_PROPERTY_ISREALTIMESTREAM, realtime ? "true" : "false");
-
   int inputstream = m_settings->GetInputstream();
+
+  // inputstream.ffmpegdirect uses ffmpeg's native HTTP client for the
+  // actual stream fetch, not Kodi's own CURL layer. Unlike
+  // inputstream.adaptive (configured below via manifest_headers), it only
+  // picks up a custom User-Agent via Kodi's "|key=value" URL suffix
+  // convention -- without it, ffmpeg falls back to Kodi's generic default
+  // UA, which gets blocked by the CDN the same way issue #16 describes.
+  std::string streamUrlForProperty = url;
+  if (inputstream == INPUTSTREAM_FFMPEGDIRECT)
+    streamUrlForProperty += "|User-Agent=" + Utils::UrlEncode(EonParameters[m_platform].user_agent);
+
+  properties.emplace_back(PVR_STREAM_PROPERTY_STREAMURL, streamUrlForProperty);
+  properties.emplace_back(PVR_STREAM_PROPERTY_ISREALTIMESTREAM, realtime ? "true" : "false");
 
   if (inputstream == INPUTSTREAM_ADAPTIVE)
   {
@@ -1273,6 +1283,8 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
               isLive ? "live" : "timeshift", channel.iUniqueId);
     return false;
   }
+  result.serverIp = currentServer.ip;
+  result.serverHostname = currentServer.hostname;
 
   std::string plain_aes;
   const bool use_adaptive_stream_hint =
@@ -1347,14 +1359,15 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
 
   kodi::Log(ADDON_LOG_DEBUG, "Encrypted Stream URL -> %s", result.url.c_str());
 
-  if (includeDiagnostics && !isLive)
+  if (includeDiagnostics)
   {
     Curl manifestCurl;
     manifestCurl.AddHeader("User-Agent", EonParameters[m_platform].user_agent);
     int manifestStatus = 0;
     const std::string manifestBody = manifestCurl.Get(result.url, manifestStatus);
     kodi::Log(ADDON_LOG_INFO,
-              "Replay manifest fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
+              "%s manifest fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
+              isLive ? "Live" : "Replay",
               manifestStatus, manifestBody.size(), CountOccurrences(manifestBody, "#EXTINF"),
               BoolState(manifestBody.find("#EXT-X-ENDLIST") != std::string::npos),
               BoolState(manifestBody.find("#EXT-X-PLAYLIST-TYPE:VOD") != std::string::npos),
@@ -1367,7 +1380,8 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
       int variantStatus = 0;
       const std::string variantBody = manifestCurl.Get(variantUrl, variantStatus);
       kodi::Log(ADDON_LOG_INFO,
-                "Replay variant fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
+                "%s variant fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
+                isLive ? "Live" : "Replay",
                 variantStatus, variantBody.size(), CountOccurrences(variantBody, "#EXTINF"),
                 BoolState(variantBody.find("#EXT-X-ENDLIST") != std::string::npos),
                 BoolState(variantBody.find("#EXT-X-PLAYLIST-TYPE:VOD") != std::string::npos),
@@ -2052,42 +2066,35 @@ PVR_ERROR CPVREon::GetStreamProperties(
     if (!isLive && endtime > starttime &&
         m_settings->GetInputstream() == INPUTSTREAM_FFMPEGDIRECT)
     {
-      EonServer currentServer;
-      if (GetServer(false, currentServer))
-      {
-        int64_t serverTimeOffsetMs = 0;
-        const std::string serverTimeStr = GetTime();
-        if (!serverTimeStr.empty())
-        {
-          try
-          {
-            serverTimeOffsetMs = std::stoll(serverTimeStr) -
-                                  static_cast<int64_t>(time(nullptr)) * 1000;
-          }
-          catch (...) { serverTimeOffsetMs = 0; }
-        }
+      // Reuse the exact server BuildPlaybackUrl already picked for the
+      // original URL. Calling GetServer() again here independently can
+      // return a different edge node (the underlying server list isn't
+      // guaranteed stable across calls), which desyncs the proxy's seek
+      // URLs from the session's actual edge server and gets them rejected.
+      StreamParams sp;
+      sp.publishingPoint = channel.publishingPoints[0].publishingPoint;
+      sp.streamingProfile = playback.streamProfile;
+      sp.serviceProvider = m_service_provider;
+      sp.streamUser = m_settings->GetEonStreamUser();
+      sp.streamKey = m_settings->GetEonStreamKey();
+      sp.serverIp = playback.serverIp;
+      sp.serverHostname = playback.serverHostname;
+      sp.deviceNumber = m_settings->GetEonDeviceNumber();
+      sp.sig = channel.sig;
+      sp.aaEnabled = channel.aaEnabled;
+      sp.platform = m_platform;
+      sp.maxBitrate = static_cast<unsigned int>(playback.bitrate);
+      // The CDN rejects a stale ctime (>~20s old), so the proxy fetches
+      // this fresh for every seek rather than relying on a cached offset.
+      sp.apiTimeUrl = m_api + "v1/time";
+      sp.accessToken = m_settings->GetEonAccessToken();
+      sp.userAgent = EonParameters[m_platform].user_agent;
 
-        StreamParams sp;
-        sp.publishingPoint = channel.publishingPoints[0].publishingPoint;
-        sp.streamingProfile = playback.streamProfile;
-        sp.serviceProvider = m_service_provider;
-        sp.streamUser = m_settings->GetEonStreamUser();
-        sp.streamKey = m_settings->GetEonStreamKey();
-        sp.serverIp = currentServer.ip;
-        sp.serverHostname = currentServer.hostname;
-        sp.deviceNumber = m_settings->GetEonDeviceNumber();
-        sp.sig = channel.sig;
-        sp.aaEnabled = channel.aaEnabled;
-        sp.platform = m_platform;
-        sp.maxBitrate = static_cast<unsigned int>(playback.bitrate);
-        sp.serverTimeOffsetMs = serverTimeOffsetMs;
-
-        m_redirectProxy.Stop();
-        m_redirectProxy.SetStreamParams(sp);
-        catchupProxyReady = m_redirectProxy.Start();
-        if (!catchupProxyReady)
-          kodi::Log(ADDON_LOG_ERROR, "Failed to start seek redirect proxy, falling back to simplified replay mode");
-      }
+      m_redirectProxy.Stop();
+      m_redirectProxy.SetStreamParams(sp);
+      catchupProxyReady = m_redirectProxy.Start();
+      if (!catchupProxyReady)
+        kodi::Log(ADDON_LOG_ERROR, "Failed to start seek redirect proxy, falling back to simplified replay mode");
     }
 
     SetStreamProperties(properties, playback.url, isLive, false, isLive, starttime, endtime,
@@ -2095,10 +2102,16 @@ PVR_ERROR CPVREon::GetStreamProperties(
 
     if (catchupProxyReady)
     {
+      // Same "|User-Agent=..." suffix as the main streamurl property (see
+      // SetStreamProperties) -- ffmpegdirect re-parses protocol options
+      // from whichever URL becomes m_streamUrl, including the catchup
+      // format string and this fallback default_url, not just the initial
+      // PVR_STREAM_PROPERTY_STREAMURL.
+      const std::string uaSuffix = "|User-Agent=" + Utils::UrlEncode(EonParameters[m_platform].user_agent);
       const std::string catchup_url =
-          "http://127.0.0.1:" + std::to_string(m_redirectProxy.GetPort()) + "/stream?t={utc}";
+          "http://127.0.0.1:" + std::to_string(m_redirectProxy.GetPort()) + "/stream?t={utc}" + uaSuffix;
       properties.emplace_back("inputstream.ffmpegdirect.catchup_url_format_string", catchup_url);
-      properties.emplace_back("inputstream.ffmpegdirect.default_url", playback.url);
+      properties.emplace_back("inputstream.ffmpegdirect.default_url", playback.url + uaSuffix);
     }
 
     for (auto& prop : properties)

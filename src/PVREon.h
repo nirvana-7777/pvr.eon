@@ -212,6 +212,8 @@ private:
     std::string url;
     std::string streamProfile;
     int bitrate = 0;
+    std::string serverIp;
+    std::string serverHostname;
   };
 
   void SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& properties,

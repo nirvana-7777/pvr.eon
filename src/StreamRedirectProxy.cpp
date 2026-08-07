@@ -9,6 +9,8 @@
 #include "Base64.h"
 #include "Crypto.h"
 #include "Utils.h"
+#include "http/Curl.h"
+#include "rapidjson/document.h"
 
 #include <kodi/General.h>
 
@@ -37,6 +39,36 @@ constexpr auto kSeekCacheWindow = std::chrono::milliseconds(10000);
 const std::string kPlayer = "m3u8";
 const std::string kConnTypeEthernet = "ETHERNET";
 const std::string kConnTypeBrowser = "BROWSER";
+
+// The CDN rejects an encrypted URL if its embedded ctime is more than
+// ~20 seconds old, so this must be fetched fresh for every seek -- mirrors
+// CPVREon::GetTime(), which the non-proxy path calls for every request.
+std::string FetchServerTime(const StreamParams& params)
+{
+  const int64_t fallbackMs = static_cast<int64_t>(time(nullptr)) * 1000;
+  if (params.apiTimeUrl.empty())
+    return std::to_string(fallbackMs);
+
+  Curl curl;
+  curl.AddHeader("Content-Type", "application/json");
+  if (!params.userAgent.empty())
+    curl.AddHeader("User-Agent", params.userAgent);
+  if (!params.accessToken.empty())
+    curl.AddHeader("Authorization", "bearer " + params.accessToken);
+
+  int statusCode = 0;
+  const std::string body = curl.Get(params.apiTimeUrl, statusCode);
+
+  rapidjson::Document doc;
+  doc.Parse(body.c_str());
+  if (doc.GetParseError() || statusCode != 200 || !doc.HasMember("time") || !doc["time"].IsString())
+  {
+    kodi::Log(ADDON_LOG_ERROR, "StreamRedirectProxy: failed to fetch server time (status=%d), falling back to device clock", statusCode);
+    return std::to_string(fallbackMs);
+  }
+
+  return doc["time"].GetString();
+}
 }
 
 StreamRedirectProxy::StreamRedirectProxy() {}
@@ -212,19 +244,11 @@ void StreamRedirectProxy::ServerThread()
   }
 }
 
-std::string StreamRedirectProxy::BuildEncryptedUrl(time_t timestamp)
+namespace
 {
-  StreamParams params;
-  {
-    std::lock_guard<std::mutex> lock(m_paramsMutex);
-    params = m_params;
-  }
-
-  const int64_t localMs = static_cast<int64_t>(time(nullptr)) * 1000;
-  const int64_t serverMs = localMs + params.serverTimeOffsetMs;
-  const std::string ctime = std::to_string(serverMs);
-  const std::string sessionId = Utils::CreateUUID();
-
+std::string BuildEncryptedUrlForSession(const StreamParams& params, time_t timestamp,
+                                         const std::string& ctime, const std::string& sessionId)
+{
   std::string plain_aes;
   if (params.platform == kAndroidTvPlatform)
   {
@@ -246,18 +270,23 @@ std::string StreamRedirectProxy::BuildEncryptedUrl(time_t timestamp)
   }
   else
   {
+    // No "adaptive=true;" here: the proxy is only ever used for replay via
+    // ffmpegdirect, which never sets that hint in the original request (see
+    // use_adaptive_stream_hint in PVREon.cpp's BuildPlaybackUrl) -- including
+    // it produces a payload the CDN doesn't expect and silently rejects.
     plain_aes = "channel=" + params.publishingPoint + ";"
                 "stream=" + params.streamingProfile + ";"
                 "sp=" + params.serviceProvider + ";"
                 "u=" + params.streamUser + ";"
                 "ss=" + params.streamKey + ";"
-                "minvbr=100;adaptive=true;player=" + kPlayer + ";"
+                "minvbr=100;"
                 "sig=" + params.sig + ";"
                 "session=" + sessionId + ";"
                 "m=" + params.serverIp + ";"
                 "device=" + params.deviceNumber + ";"
                 "ctime=" + ctime + ";"
                 "conn=" + kConnTypeBrowser + ";"
+                "player=" + kPlayer + ";"
                 "t=" + std::to_string(static_cast<long long>(timestamp)) + "000;"
                 "aa=" + (params.aaEnabled ? "true" : "false");
   }
@@ -285,6 +314,22 @@ std::string StreamRedirectProxy::BuildEncryptedUrl(time_t timestamp)
 
   if (params.platform != kAndroidTvPlatform)
     enc_url += "&sig=" + params.sig;
+
+  return enc_url;
+}
+} // namespace
+
+std::string StreamRedirectProxy::BuildEncryptedUrl(time_t timestamp)
+{
+  StreamParams params;
+  {
+    std::lock_guard<std::mutex> lock(m_paramsMutex);
+    params = m_params;
+  }
+
+  const std::string ctime = FetchServerTime(params);
+  const std::string sessionId = Utils::CreateUUID();
+  const std::string enc_url = BuildEncryptedUrlForSession(params, timestamp, ctime, sessionId);
 
   kodi::Log(ADDON_LOG_DEBUG, "StreamRedirectProxy: t=%lld -> %s",
             static_cast<long long>(timestamp), enc_url.c_str());

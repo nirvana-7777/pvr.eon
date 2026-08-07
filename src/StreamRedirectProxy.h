@@ -31,10 +31,18 @@ struct StreamParams
   bool aaEnabled = false;
   int platform = 0;
   unsigned int maxBitrate = 0;
-  // serverTimeMs - localTimeMs at the time these params were captured.
-  // Lets the proxy compute an accurate ctime for each seek without
-  // calling the server's /v1/time endpoint again.
-  int64_t serverTimeOffsetMs = 0;
+  // Used to fetch a fresh ctime for every seek (see BuildEncryptedUrl) --
+  // the CDN rejects an encrypted URL if its embedded ctime is more than
+  // ~20 seconds old, so a cached device-clock-relative offset isn't
+  // reliable enough; matches how the non-proxy path calls this API fresh
+  // for every request.
+  std::string apiTimeUrl;
+  std::string accessToken;
+  // Sent as the User-Agent for the proxy's own HTTP calls (time fetch,
+  // verify-fetch) -- the CDN blocks requests missing a recognized
+  // smart-device UA the same way it does for the main manifest fetch
+  // (see issue #16 / EonParameters[m_platform].user_agent).
+  std::string userAgent;
 };
 
 // A local loopback HTTP server used as inputstream.ffmpegdirect's
