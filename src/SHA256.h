@@ -1,8 +1,10 @@
 #ifndef SHA256_H
 #define SHA256_H
 
-#include <string>
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <string>
 
 class SHA256 {
 

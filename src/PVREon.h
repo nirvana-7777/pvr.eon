@@ -6,8 +6,10 @@
  *  See LICENSE.md for more information.
  */
 
-#include <string>
+#include <cstddef>
+#include <cstdint>
 #include <deque>
+#include <string>
 #include <vector>
 
 #include <kodi/addon-instance/PVR.h>
