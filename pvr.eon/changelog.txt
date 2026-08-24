@@ -1,3 +1,22 @@
+v21.8.5
+  - Fix being unable to return to live TV from the guide: while a replay show
+    was playing, selecting the channel's currently airing programme did
+    nothing at all. Replay is opened as an EPG-tag playback session again
+    rather than claiming the channel session, which is what made Kodi treat
+    the channel as already playing live and skip the re-tune. Trade-off: the
+    displayed title stays pinned to the selected show if playback continues
+    past its scheduled end (progress and seeking stay correct)
+  - Fix "playback failed" when two stream opens overlap. The local seek proxy
+    was torn down and relistened on a fresh port for every new stream, which
+    left the open already in flight pointing at a dead port. It now keeps one
+    port for the add-on's lifetime and tracks each stream as its own session,
+    so concurrent opens no longer invalidate each other. Overlap is routine:
+    Kodi asks for an EPG tag's stream properties twice per playback, and its
+    "play next programme automatically" can fire at the same moment the user
+    picks something else in the guide
+  - Declare inputstream.ffmpegdirect as a dependency again so Kodi installs
+    it automatically; it is the inputstream the add-on's own documentation
+    tells users to select, but the import was dropped in 2023
 v21.8.4
   - Fix replay/catchup not updating title/progress once playback continues
     past the watched show's scheduled end

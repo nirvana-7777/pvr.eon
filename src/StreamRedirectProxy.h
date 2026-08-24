@@ -10,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -66,24 +67,40 @@ public:
   void Stop();
   int GetPort() const { return m_port; }
 
-  void SetStreamParams(const StreamParams& params);
+  // Registers one playback session's parameters and returns the id to embed
+  // in the URLs handed to inputstream.ffmpegdirect (see
+  // catchup_url_format_string in PVREon.cpp).
+  //
+  // Sessions are kept side by side instead of one set of params being
+  // overwritten because Kodi can have two stream opens in flight at once:
+  // it calls GetEPGTagStreamProperties twice for a single EPG playback (once
+  // to read EPGPlaybackAsLive, once via StartPlayback), and its
+  // autoplay-next-programme can fire at the same moment the user picks
+  // something else in the guide. A URL already handed out has to keep
+  // resolving after that -- tearing the proxy down and relistening on a
+  // fresh port made the earlier open fail outright with "playback failed".
+  int RegisterSession(const StreamParams& params);
 
 private:
   void ServerThread();
-  std::string BuildEncryptedUrl(time_t timestamp);
+  bool GetSessionParams(int sessionId, StreamParams& params);
+  static std::string BuildEncryptedUrl(const StreamParams& params, time_t timestamp);
 
   int m_port = 0;
   int m_serverSocket = -1;
   std::atomic<bool> m_running{false};
   std::thread m_thread;
 
-  std::mutex m_paramsMutex;
-  StreamParams m_params;
+  std::mutex m_sessionsMutex;
+  std::map<int, StreamParams> m_sessions;
+  int m_nextSessionId = 1;
+  int m_latestSessionId = 0;
 
   // Reuse the same encrypted URL for rapid repeated requests at the same
-  // timestamp (ffmpegdirect retries), instead of minting a new session
-  // each time.
+  // session and timestamp (ffmpegdirect retries), instead of minting a new
+  // CDN session each time.
   std::mutex m_cacheMutex;
+  int m_lastSeekSessionId = 0;
   time_t m_lastSeekTimestamp = 0;
   std::string m_lastStreamUrl;
   std::chrono::steady_clock::time_point m_lastSeekTime;

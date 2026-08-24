@@ -120,25 +120,6 @@ struct EonPendingPlayback
   time_t requestTime = 0;
 };
 
-// Hand-off for the standard (non-native, ffmpegdirect) playback path: Kodi's
-// PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE makes it open a channel FileItem
-// instead of a fixed EPG-tag one, so its title/progress tracking follows
-// the channel's real current EPG event dynamically instead of staying
-// pinned to whatever was selected -- but that means Kodi immediately
-// re-invokes GetChannelStreamProperties instead of using anything we
-// returned from GetEPGTagStreamProperties, discarding the specific past
-// start/end time the user actually selected. This carries it across that
-// hand-off so GetChannelStreamProperties can still start the stream at the
-// right point instead of "now".
-struct EonPendingReplayAsLive
-{
-  bool active = false;
-  int channelUid = 0;
-  time_t startTime = 0;
-  time_t endTime = 0;
-  time_t requestTime = 0;
-};
-
 struct EonNativeStreamState
 {
   bool open = false;
@@ -321,7 +302,6 @@ private:
   std::string m_images_api;
   int m_platform;
   EonPendingPlayback m_pendingPlayback;
-  EonPendingReplayAsLive m_pendingReplayAsLive;
   EonNativeStreamState m_nativeStream;
 
 //  std::string m_ss_refresh;

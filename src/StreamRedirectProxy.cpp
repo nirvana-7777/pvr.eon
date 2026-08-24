@@ -31,6 +31,37 @@ constexpr int kAndroidTvPlatform = 1;
 // How long a redirect for the same seek timestamp is reused instead of
 // minting a fresh encrypted URL, to absorb ffmpegdirect's retry requests.
 constexpr auto kSeekCacheWindow = std::chrono::milliseconds(10000);
+// Only the newest few sessions can realistically still have URLs in flight
+// (see RegisterSession); retaining more would just leak stream credentials
+// for playbacks that ended long ago.
+constexpr size_t kMaxRetainedSessions = 4;
+
+// Reads an integer query parameter out of a raw request line, e.g. "s" from
+// "GET /stream?s=3&t=1787560500 HTTP/1.1". Anchored on the "?"/"&" that must
+// precede a parameter name so a bare find("t=") cannot match inside the
+// path or another value.
+bool GetQueryParam(const std::string& request, const std::string& name, long long& value)
+{
+  for (const std::string& prefix : {"?" + name + "=", "&" + name + "="})
+  {
+    const size_t pos = request.find(prefix);
+    if (pos == std::string::npos)
+      continue;
+
+    const size_t start = pos + prefix.size();
+    const size_t end = request.find_first_of("& \r\n", start);
+    try
+    {
+      value = std::stoll(request.substr(start, end - start));
+      return true;
+    }
+    catch (...)
+    {
+      return false;
+    }
+  }
+  return false;
+}
 
 // Mirrors PLAYER/CONN_TYPE_* in Globals.h. Not reused directly because
 // Globals.h's EON_USER_AGENT needs KODI_VERSION, which is only defined
@@ -146,10 +177,42 @@ void StreamRedirectProxy::Stop()
   kodi::Log(ADDON_LOG_INFO, "StreamRedirectProxy: stopped");
 }
 
-void StreamRedirectProxy::SetStreamParams(const StreamParams& params)
+int StreamRedirectProxy::RegisterSession(const StreamParams& params)
 {
-  std::lock_guard<std::mutex> lock(m_paramsMutex);
-  m_params = params;
+  std::lock_guard<std::mutex> lock(m_sessionsMutex);
+
+  const int sessionId = m_nextSessionId++;
+  m_sessions[sessionId] = params;
+  m_latestSessionId = sessionId;
+
+  while (m_sessions.size() > kMaxRetainedSessions)
+    m_sessions.erase(m_sessions.begin());
+
+  return sessionId;
+}
+
+bool StreamRedirectProxy::GetSessionParams(int sessionId, StreamParams& params)
+{
+  std::lock_guard<std::mutex> lock(m_sessionsMutex);
+
+  auto it = m_sessions.find(sessionId);
+  if (it == m_sessions.end())
+  {
+    // Unknown or already-evicted session: serve it with the newest params
+    // rather than failing the request outright, which keeps a stale URL
+    // playing the right channel in the common case where only one stream
+    // is actually open.
+    it = m_sessions.find(m_latestSessionId);
+    if (it == m_sessions.end())
+      return false;
+
+    kodi::Log(ADDON_LOG_DEBUG,
+              "StreamRedirectProxy: unknown session %d, falling back to newest (%d)", sessionId,
+              m_latestSessionId);
+  }
+
+  params = it->second;
+  return true;
 }
 
 void StreamRedirectProxy::ServerThread()
@@ -181,64 +244,68 @@ void StreamRedirectProxy::ServerThread()
     }
     buf[bytesRead] = '\0';
 
-    // Parse the timestamp from "GET /stream?t=<timestamp> HTTP/...". t=0 is
-    // a sentinel meaning "live" (no historical offset at all) -- see
+    // Parse "GET /stream?s=<session>&t=<timestamp> HTTP/...". t=0 is a
+    // sentinel meaning "live" (no historical offset at all) -- see
     // BuildEncryptedUrlForSession, used for ffmpegdirect's default_url,
     // which it falls back to whenever a seek resolves close enough to live.
-    std::string request(buf);
-    time_t timestamp = 0;
-    bool foundTimestamp = false;
+    const std::string request(buf);
 
-    size_t tPos = request.find("t=");
-    if (tPos != std::string::npos)
-    {
-      tPos += 2;
-      size_t tEnd = request.find_first_of("& \r\n", tPos);
-      std::string tStr = request.substr(tPos, tEnd - tPos);
-      try
-      {
-        timestamp = static_cast<time_t>(std::stoll(tStr));
-        foundTimestamp = timestamp >= 0;
-      }
-      catch (...) { foundTimestamp = false; }
-    }
-
-    if (!foundTimestamp)
+    long long rawTimestamp = 0;
+    if (!GetQueryParam(request, "t", rawTimestamp) || rawTimestamp < 0)
     {
       std::string response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
       send(clientSocket, response.c_str(), response.size(), 0);
       close(clientSocket);
       continue;
     }
+    const time_t timestamp = static_cast<time_t>(rawTimestamp);
 
-    // Reuse the same encrypted URL for retries of the same timestamp.
+    long long rawSession = 0;
+    const int sessionId =
+        GetQueryParam(request, "s", rawSession) ? static_cast<int>(rawSession) : 0;
+
+    StreamParams params;
+    if (!GetSessionParams(sessionId, params))
+    {
+      kodi::Log(ADDON_LOG_ERROR, "StreamRedirectProxy: no stream params registered, cannot serve request");
+      std::string response = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n";
+      send(clientSocket, response.c_str(), response.size(), 0);
+      close(clientSocket);
+      continue;
+    }
+
+    // Reuse the same encrypted URL for retries of the same session and
+    // timestamp. Keyed on the session too: two concurrent streams can ask
+    // for the same timestamp and must not be handed each other's URL.
     std::string streamUrl;
     {
       std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
       const auto elapsed = std::chrono::steady_clock::now() - m_lastSeekTime;
-      if (timestamp == m_lastSeekTimestamp && elapsed < kSeekCacheWindow && !m_lastStreamUrl.empty())
+      if (sessionId == m_lastSeekSessionId && timestamp == m_lastSeekTimestamp &&
+          elapsed < kSeekCacheWindow && !m_lastStreamUrl.empty())
       {
         streamUrl = m_lastStreamUrl;
-        kodi::Log(ADDON_LOG_DEBUG, "StreamRedirectProxy: cache hit for t=%lld",
+        kodi::Log(ADDON_LOG_DEBUG, "StreamRedirectProxy: cache hit for s=%d t=%lld", sessionId,
                   static_cast<long long>(timestamp));
       }
     }
 
     if (streamUrl.empty())
     {
-      // A fresh session id avoids the CDN rejecting the request because
-      // the previous session is still considered "active" server-side.
-      streamUrl = BuildEncryptedUrl(timestamp);
+      // A fresh CDN session id avoids the request being rejected because
+      // the previous one is still considered "active" server-side.
+      streamUrl = BuildEncryptedUrl(params, timestamp);
 
       {
         std::lock_guard<std::mutex> cacheLock(m_cacheMutex);
+        m_lastSeekSessionId = sessionId;
         m_lastSeekTimestamp = timestamp;
         m_lastStreamUrl = streamUrl;
         m_lastSeekTime = std::chrono::steady_clock::now();
       }
 
-      kodi::Log(ADDON_LOG_DEBUG, "StreamRedirectProxy: seek to t=%lld -> new encrypted URL",
-                static_cast<long long>(timestamp));
+      kodi::Log(ADDON_LOG_DEBUG, "StreamRedirectProxy: seek to s=%d t=%lld -> new encrypted URL",
+                sessionId, static_cast<long long>(timestamp));
     }
 
     // 302 redirect (rather than proxying the body) so FFmpeg resolves
@@ -338,14 +405,8 @@ std::string BuildEncryptedUrlForSession(const StreamParams& params, time_t times
 }
 } // namespace
 
-std::string StreamRedirectProxy::BuildEncryptedUrl(time_t timestamp)
+std::string StreamRedirectProxy::BuildEncryptedUrl(const StreamParams& params, time_t timestamp)
 {
-  StreamParams params;
-  {
-    std::lock_guard<std::mutex> lock(m_paramsMutex);
-    params = m_params;
-  }
-
   const std::string ctime = FetchServerTime(params);
   const std::string sessionId = Utils::CreateUUID();
   std::string enc_url = BuildEncryptedUrlForSession(params, timestamp, ctime, sessionId);
