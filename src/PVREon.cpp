@@ -1172,10 +1172,10 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
       // growing with real time instead of capping it at the programme's
       // (possibly still in the future) end time.
       properties.emplace_back("inputstream.ffmpegdirect.stream_mode", "catchup");
-      // playForwardIndefinitely: a specific past programme resumed via the
-      // EPGPLAYBACKASLIVE hand-off (see GetChannelStreamProperties) -- it
-      // must start at ITS OWN beginning (isLive=false keeps BuildPlaybackUrl
-      // and catchup_buffer_offset targeting starttime, not "now"), but the
+      // playForwardIndefinitely: a specific past programme selected from the
+      // guide (see GetEPGTagStreamProperties) -- it must start at ITS OWN
+      // beginning (isLive=false keeps BuildPlaybackUrl and
+      // catchup_buffer_offset targeting starttime, not "now"), but the
       // underlying feed keeps extending past this programme's nominal end
       // into whatever airs next, so the seekable end needs to keep growing
       // with real time exactly like live does, not freeze at endtime.
@@ -2008,6 +2008,13 @@ PVR_ERROR CPVREon::GetEPGTagStreamProperties(
         m_pendingPlayback.endTime = tag.GetEndTime();
         m_pendingPlayback.initialPlaybackTime = initialPlaybackTime;
         m_pendingPlayback.requestTime = time(nullptr);
+        // Load-bearing here, unlike on the standard path below: this is what
+        // makes Kodi reopen via OpenLiveStream(), which is where
+        // m_pendingPlayback gets picked up -- there is no OpenEPGTagStream()
+        // implementation to fall back on. It does mean this path still has
+        // the SwitchToChannel() short-circuit problem described below, so a
+        // past programme playing here can't be left by selecting the live
+        // programme in the guide either.
         properties.emplace_back(PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE, "true");
         kodi::Log(ADDON_LOG_INFO,
                   "Queued native EPG playback. channel=%s uid=%i mode=%s programmeStart=%lld programmeEnd=%lld initialPlayback=%lld",
@@ -2020,23 +2027,37 @@ PVR_ERROR CPVREon::GetEPGTagStreamProperties(
         return PVR_ERROR_NO_ERROR;
       }
 
-      // EON's replay/catchup manifest never sets #EXT-X-ENDLIST -- it's a
-      // continuously-extending feed, not a finite recording, so playback
-      // just carries on into whatever airs next on the channel once this
-      // programme's nominal end time passes. Kodi only tracks title/EPG
-      // info dynamically for channel-type playback sessions (a fixed
-      // EPG-tag session stays pinned to this tag for its whole lifetime,
-      // by design) -- so hand this off as EPGPLAYBACKASLIVE and stash the
-      // actual requested start/end time for GetChannelStreamProperties to
-      // pick up, since Kodi discards whatever we return here and reopens
-      // via the channel path instead, which otherwise defaults to "now".
-      m_pendingReplayAsLive.active = true;
-      m_pendingReplayAsLive.channelUid = channel.iUniqueId;
-      m_pendingReplayAsLive.startTime = tag.GetStartTime();
-      m_pendingReplayAsLive.endTime = tag.GetEndTime();
-      m_pendingReplayAsLive.requestTime = time(nullptr);
-      properties.emplace_back(PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE, "true");
-      return PVR_ERROR_NO_ERROR;
+      // Deliberately NOT handed off via PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE:
+      // that makes Kodi open a channel FileItem rather than an EPG-tag one,
+      // which registers this replay session as "playing that channel". Once
+      // it is, selecting the channel's currently airing programme in the
+      // guide silently does nothing at all -- Kodi's
+      // CPVRGUIActionsPlayback::SwitchToChannel() short-circuits on
+      // IsPlayingChannel() and only sends GUI_MSG_FULLSCREEN, so the past
+      // programme just keeps playing and the user has no way back to live
+      // short of stopping playback first.
+      //
+      // The cost of keeping it an EPG-tag session is that Kodi pins the
+      // displayed title to this tag for the session's lifetime (by design;
+      // it only tracks EPG info dynamically for channel-type sessions),
+      // which shows once playback runs past this programme's scheduled end
+      // -- EON's replay/catchup manifest never sets #EXT-X-ENDLIST, so it
+      // is a continuously-extending feed that carries on into whatever airs
+      // next rather than a finite recording. Stale title text is a far
+      // smaller problem than being unable to return to live, and
+      // playForwardIndefinitely below keeps the timeline itself correct
+      // across that transition.
+      m_stream_is_live = false;
+      m_stream_start_time = tag.GetStartTime();
+      m_stream_end_time = tag.GetEndTime();
+
+      // playForwardIndefinitely: the underlying feed keeps extending past
+      // this programme's nominal end, so the seekable end has to keep
+      // growing with real time instead of freezing at endtime (see
+      // SetStreamProperties), otherwise progress and seeking break the
+      // moment playback continues into the next programme.
+      return GetStreamProperties(channel, properties, tag.GetStartTime(), tag.GetEndTime(),
+                                 /*isLive=*/false, /*playForwardIndefinitely=*/true);
     }
   }
   return PVR_ERROR_NO_ERROR;
@@ -2113,6 +2134,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
       return PVR_ERROR_SERVER_ERROR;
 
     bool catchupProxyReady = false;
+    int proxySessionId = 0;
     if (endtime > starttime && m_settings->GetInputstream() == INPUTSTREAM_FFMPEGDIRECT)
     {
       // Reuse the exact server BuildPlaybackUrl already picked for the
@@ -2140,9 +2162,15 @@ PVR_ERROR CPVREon::GetStreamProperties(
       sp.userAgent = EonParameters[m_platform].user_agent;
       sp.qualityPreference = m_settings->GetFfmpegdirectQuality();
 
-      m_redirectProxy.Stop();
-      m_redirectProxy.SetStreamParams(sp);
+      // Deliberately no Stop() first: Kodi can have a second stream open in
+      // flight (it calls GetEPGTagStreamProperties twice per EPG playback,
+      // and autoplay-next can race a user action), and relistening on a
+      // fresh port left that one holding a dead catchup_url_format_string,
+      // failing it with "playback failed". Start() is idempotent, so the
+      // port stays put and each stream gets its own session id instead.
       catchupProxyReady = m_redirectProxy.Start();
+      if (catchupProxyReady)
+        proxySessionId = m_redirectProxy.RegisterSession(sp);
       if (!catchupProxyReady)
         kodi::Log(ADDON_LOG_ERROR,
                   "Failed to start seek redirect proxy, falling back to %s",
@@ -2150,8 +2178,8 @@ PVR_ERROR CPVREon::GetStreamProperties(
                          : "simplified replay mode");
     }
 
-    // Also true for a resumed past programme (see GetChannelStreamProperties's
-    // EPGPLAYBACKASLIVE hand-off): its underlying feed keeps extending past
+    // Also true for a past programme played from the guide (see
+    // GetEPGTagStreamProperties): its underlying feed keeps extending past
     // its own nominal end too, so ffmpegdirect's own accurate, growing
     // catchup-mode times are the correct source for it as well.
     m_live_using_catchup = (isLive || playForwardIndefinitely) && catchupProxyReady;
@@ -2167,7 +2195,9 @@ PVR_ERROR CPVREon::GetStreamProperties(
       // format string and this fallback default_url, not just the initial
       // PVR_STREAM_PROPERTY_STREAMURL.
       const std::string uaSuffix = "|User-Agent=" + Utils::UrlEncode(EonParameters[m_platform].user_agent);
-      const std::string proxyBase = "http://127.0.0.1:" + std::to_string(m_redirectProxy.GetPort()) + "/stream?t=";
+      const std::string proxyBase = "http://127.0.0.1:" +
+                                    std::to_string(m_redirectProxy.GetPort()) + "/stream?s=" +
+                                    std::to_string(proxySessionId) + "&t=";
       properties.emplace_back("inputstream.ffmpegdirect.catchup_url_format_string", proxyBase + "{utc}" + uaSuffix);
       // ffmpegdirect falls back to default_url whenever a seek resolves close
       // enough to live (see GetUpdatedCatchupUrl in its source). A static
@@ -2205,38 +2235,6 @@ PVR_ERROR CPVREon::GetChannelStreamProperties(
   EonChannel addonChannel;
   if (GetChannel(channel, addonChannel)) {
     if (addonChannel.subscribed) {
-      // Pick up a replay/catchup request handed off via
-      // GetEPGTagStreamProperties's EPGPLAYBACKASLIVE (see there) instead
-      // of defaulting to a normal live tune-in at "now".
-      const time_t pendingCheckNow = time(nullptr);
-      if (m_pendingReplayAsLive.active &&
-          m_pendingReplayAsLive.channelUid == addonChannel.iUniqueId &&
-          pendingCheckNow - m_pendingReplayAsLive.requestTime <= PENDING_PLAYBACK_TTL_SECONDS)
-      {
-        const time_t pendingStart = m_pendingReplayAsLive.startTime;
-        const time_t pendingEnd = m_pendingReplayAsLive.endTime;
-        m_pendingReplayAsLive = {};
-
-        m_stream_is_live = false;
-        m_stream_start_time = pendingStart;
-        m_stream_end_time = pendingEnd;
-
-        kodi::Log(ADDON_LOG_INFO,
-                  "Resuming handed-off replay via channel open. channelUid=%i start=%lld end=%lld",
-                  addonChannel.iUniqueId, static_cast<long long>(pendingStart),
-                  static_cast<long long>(pendingEnd));
-
-        // isLive=false: BuildPlaybackUrl and catchup_buffer_offset must
-        // target pendingStart, not "now" (that's the whole point of this
-        // hand-off). playForwardIndefinitely=true: still keep the seekable
-        // end growing with real time (see SetStreamProperties) so seeking
-        // doesn't break once playback continues past pendingEnd into
-        // whatever airs next.
-        return GetStreamProperties(addonChannel, properties, pendingStart, pendingEnd, false,
-                                    /*playForwardIndefinitely=*/true);
-      }
-      m_pendingReplayAsLive = {};
-
       m_stream_is_live = true;
       m_stream_start_time = 0;
       m_stream_end_time = 0;
@@ -2515,9 +2513,9 @@ PVR_ERROR CPVREon::GetStreamTimes(kodi::addon::PVRStreamTimes& times)
 {
   if (!UseExperimentalNativeStream() || !m_nativeStream.open)
   {
-    // Standard (non-native-stream) playback. Live, and a resumed past
-    // programme handed off via EPGPLAYBACKASLIVE, both normally play
-    // through the same inputstream.ffmpegdirect catchup mode as replay
+    // Standard (non-native-stream) playback. Live, and a past programme
+    // played from the guide, both normally play
+    // through the same inputstream.ffmpegdirect catchup mode
     // (see SetStreamProperties), which has its own accurate, seek-aware,
     // growing GetTimes() -- reporting our own fixed/real-time estimate
     // here as well fights it: after a seek (or once playback continues
