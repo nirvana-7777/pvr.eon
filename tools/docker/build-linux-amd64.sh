@@ -30,7 +30,7 @@ docker build \
 docker run --rm \
   --platform linux/amd64 \
   --user "$(id -u):$(id -g)" \
-  -e BUILD_TYPE="${BUILD_TYPE:-Debug}" \
+  -e BUILD_TYPE="${BUILD_TYPE:-Release}" \
   -e XBMC_REF="${XBMC_REF:-origin/Omega}" \
   -v "${xbmc_root}:/src/xbmc:ro" \
   -v "${addon_root}:/src/pvr.eon:ro" \

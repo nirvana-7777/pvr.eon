@@ -42,6 +42,9 @@ constexpr time_t NATIVE_SEEK_RESTART_EPSILON_SECONDS = 2;
 constexpr time_t NATIVE_LIVE_EDGE_DELAY_SECONDS = 15;
 constexpr int64_t NATIVE_INITIAL_SEEK_IGNORE_WINDOW_MS = 4000;
 constexpr int NATIVE_POLL_RETRY_COUNT = 10;
+// Depth of EON's rolling EPG archive; requests reaching further back are
+// rejected outright rather than truncated to what is available.
+constexpr time_t EPG_ARCHIVE_SECONDS = 7 * 24 * 60 * 60;
 constexpr auto NATIVE_POLL_RETRY_DELAY = std::chrono::milliseconds(200);
 
 int64_t MonotonicNowMs()
@@ -160,6 +163,11 @@ std::vector<std::string> ExtractMediaSegmentUrls(const std::string& playlistBody
   return urls;
 }
 
+// The provider setting's options mirror the broker's v2/brands response (see
+// resources/settings.xml). Matching on the brand's own identifier rather than
+// its position keeps the setting working if the broker ever reorders or adds
+// brands -- position alone previously sent "EON Hrvatska" to Vivacom's CDN
+// once the broker's list changed underneath it.
 std::string ExpectedBrandIdentifier(int providerSetting)
 {
   switch (providerSetting)
@@ -168,7 +176,11 @@ std::string ExpectedBrandIdentifier(int providerSetting)
       return "sbb-qa";
     case 1: // Telemach
       return "telemach";
-    case 3: // Vivacom
+    case 2: // Telemach HR
+      return "telemach-hr";
+    case 3: // Telemach SI
+      return "telemach-si";
+    case 4: // Vivacom
       return "vivacom";
     case 5: // Nova
       return "nova";
@@ -325,6 +337,24 @@ int CPVREon::getBitrate(const bool isRadio, const int id) {
   return 0;
 }
 
+// minvbr/maxvbr in the signed payload are VIDEO bitrate bounds, so they must
+// always come from videoBitrate. getBitrate() above returns audioBitrate for
+// radio, which is correct for picking the profile but not for these bounds:
+// an audio-only profile (AO96, id 17: audioBitrate 96, videoBitrate 0) would
+// otherwise ask the edge for a rendition carrying >=96kbps of video, which
+// does not exist, and the edge answers "403.5300 Streamable bandwidth
+// exceeded". Radio channels on AO96 all failed this way; Stingray, on AV96
+// (id 18, videoBitrate 200), played only because 200 >= 96 is satisfiable.
+int CPVREon::getVideoBitrate(const int id) {
+  for(unsigned int i = 0; i < m_rendering_profiles.size(); i++)
+  {
+    if (id == m_rendering_profiles[i].id) {
+      return m_rendering_profiles[i].videoBitrate;
+    }
+  }
+  return 0;
+}
+
 std::string CPVREon::getCoreStreamId(const int id) {
   for(unsigned int i = 0; i < m_rendering_profiles.size(); i++)
   {
@@ -364,6 +394,18 @@ std::string CPVREon::GetBaseApi(const std::string& cdn_identifier) {
     }
   }
 
+  // No CDN of its own (an unknown brand, or one the broker has since
+  // renamed): use the one the broker marks as the default. All the ex-Yu
+  // brands share it, so this is the correct host for anything that isn't
+  // Vivacom or Nova, and a working one to fall back to for those.
+  for(int i=0; i < m_cdns.size(); i++){
+    if (m_cdns[i].isDefault) {
+      kodi::Log(ADDON_LOG_WARNING, "No CDN matched '%s'; using the broker's default CDN '%s'.",
+                cdn_identifier.c_str(), m_cdns[i].identifier.c_str());
+      return m_cdns[i].baseApi;
+    }
+  }
+
   return "";
 }
 
@@ -377,10 +419,9 @@ std::string CPVREon::GetBrandIdentifier()
     return "";
   }
 
-  int i = 0;
-  int sp_id = m_settings->GetEonServiceProvider();
+  const int sp_id = m_settings->GetEonServiceProvider();
   const std::string expected_identifier = ExpectedBrandIdentifier(sp_id);
-  kodi::Log(ADDON_LOG_DEBUG, "Requested Service Provider ID:%u", sp_id);
+  kodi::Log(ADDON_LOG_DEBUG, "Requested Service Provider ID:%i", sp_id);
 
   const rapidjson::Value& brands = doc;
 
@@ -392,35 +433,26 @@ std::string CPVREon::GetBrandIdentifier()
     if (!expected_identifier.empty() && identifier == expected_identifier)
     {
       kodi::Log(ADDON_LOG_INFO,
-                "Resolved provider setting %i via stable brand identifier '%s'.",
-                sp_id, identifier.c_str());
+                "Resolved provider setting %i via brand identifier '%s' -> CDN '%s'.",
+                sp_id, identifier.c_str(),
+                Utils::JsonStringOrEmpty(brandItem, "cdnIdentifier").c_str());
       return Utils::JsonStringOrEmpty(brandItem, "cdnIdentifier");
     }
-
-    if (expected_identifier.empty() && i == sp_id)
-      return Utils::JsonStringOrEmpty(brandItem, "cdnIdentifier");
-
-    i++;
   }
 
-  if (!expected_identifier.empty())
-  {
-    kodi::Log(ADDON_LOG_WARNING,
-              "Stable brand identifier '%s' was not found for provider setting %i. Falling back to legacy index mapping.",
-              expected_identifier.c_str(), sp_id);
-
-    i = 0;
-    for (rapidjson::Value::ConstValueIterator itr1 = brands.Begin();
-         itr1 != brands.End(); ++itr1)
-    {
-      if (i == sp_id)
-      {
-        const rapidjson::Value& brandItem = (*itr1);
-        return Utils::JsonStringOrEmpty(brandItem, "cdnIdentifier");
-      }
-      i++;
-    }
-  }
+  // Deliberately no position-based fallback: the broker's list has already
+  // changed once (NetTV Plus and EON Hrvatska are gone, three Telemach
+  // brands took their place), so a position no longer means what it did
+  // when the setting's options were written. Falling back to it silently
+  // hands the user a different provider's CDN -- "EON Hrvatska" had no
+  // identifier of its own and would have landed on whatever brand now sits
+  // at position 4. Returning nothing instead lets GetBaseApi fall back to
+  // the CDN the broker itself marks isDefault, shared by all the ex-Yu
+  // brands, which is the right answer for an unknown or newly added brand.
+  kodi::Log(ADDON_LOG_WARNING,
+            "Brand identifier '%s' for provider setting %i was not among the broker's brands; "
+            "falling back to the broker's default CDN.",
+            expected_identifier.c_str(), sp_id);
 
   return "";
 }
@@ -736,6 +768,14 @@ CPVREon::CPVREon() :
 
   srand(time(nullptr));
 
+  // Evaluated up front rather than inline in the log call below: it decides
+  // whether the user is warned, and that must not read as a side effect of
+  // logging.
+  const bool settings_valid = m_settings->VerifySettings();
+  if (!settings_valid)
+    kodi::QueueNotification(QueueMsg::QUEUE_WARNING, kodi::addon::GetLocalizedString(30054),
+                            kodi::addon::GetLocalizedString(30055));
+
   kodi::Log(ADDON_LOG_INFO,
             "Starting pvr.eon. platform=%s provider=%i tv=%s radio=%s groups=%s hideUnsubscribed=%s shortNames=%s ageRating=%i inputstream=%i settingsLoaded=%s settingsValid=%s",
             PlatformName(m_platform),
@@ -748,7 +788,7 @@ CPVREon::CPVREon() :
             m_settings->GetAgeRating(),
             m_settings->GetInputstream(),
             BoolState(settings_loaded),
-            BoolState(m_settings->VerifySettings()));
+            BoolState(settings_valid));
   kodi::Log(ADDON_LOG_DEBUG,
             "Startup settings state. username=%s password=%s access=%s refresh=%s generic=%s deviceId=%s deviceNumber=%s deviceSerial=%s subscriberId=%s",
             DescribeValue(m_settings->GetEonUsername()).c_str(),
@@ -764,9 +804,22 @@ CPVREon::CPVREon() :
   if (GetCDNInfo()) {
     std::string cdn_identifier = GetBrandIdentifier();
     kodi::Log(ADDON_LOG_DEBUG, "CDN Identifier: %s", cdn_identifier.c_str());
-    std::string baseApi = GetBaseApi(cdn_identifier);
-    m_api = "https://api-" + EonParameters[m_platform].api_prefix + "." + baseApi + "/";
-    m_images_api = "https://images-" + EonParameters[m_platform].api_prefix + "." + baseApi + "/";
+    const std::string baseApi = GetBaseApi(cdn_identifier);
+    if (baseApi.empty())
+    {
+      // Would otherwise build a malformed host ("api-web..//"). GLOBAL_URL
+      // already carries its own trailing slash, hence the separate branch.
+      kodi::Log(ADDON_LOG_ERROR,
+                "The broker published no API host for CDN '%s'; keeping the global one.",
+                cdn_identifier.c_str());
+      m_api = "https://api-" + EonParameters[m_platform].api_prefix + "." + GLOBAL_URL;
+      m_images_api = "https://images-" + EonParameters[m_platform].api_prefix + "." + GLOBAL_URL;
+    }
+    else
+    {
+      m_api = "https://api-" + EonParameters[m_platform].api_prefix + "." + baseApi + "/";
+      m_images_api = "https://images-" + EonParameters[m_platform].api_prefix + "." + baseApi + "/";
+    }
   } else {
     m_api = "https://api-" + EonParameters[m_platform].api_prefix + "." + GLOBAL_URL;
     m_images_api = "https://images-" + EonParameters[m_platform].api_prefix + "." + GLOBAL_URL;
@@ -1007,12 +1060,16 @@ bool CPVREon::LoadChannels(const bool isRadio)
         pp.profileIds.emplace_back(itr3->GetInt());
       }
 
+      // playerCfgs carries a per-pool signature keyed by type. Radio channels
+      // on this provider advertise only a "radio" entry -- there is no "live"
+      // one -- so matching solely on "live" left sig empty for all of them.
+      const std::string wantedCfgType = isRadio ? "radio" : "live";
       const rapidjson::Value& playerCfgs = ppItem["playerCfgs"];
       for (rapidjson::Value::ConstValueIterator itr3 = playerCfgs.Begin();
           itr3 != playerCfgs.End(); ++itr3)
       {
         const rapidjson::Value& playerCfgItem = (*itr3);
-        if (Utils::JsonStringOrEmpty(playerCfgItem, "type") ==  "live") {
+        if (Utils::JsonStringOrEmpty(playerCfgItem, "type") ==  wantedCfgType) {
           eon_channel.sig = Utils::JsonStringOrEmpty(playerCfgItem, "sig");
         }
       }
@@ -1087,7 +1144,8 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
                                   time_t starttime,
                                   time_t endtime,
                                   bool catchupProxyReady,
-                                  bool playForwardIndefinitely)
+                                  bool playForwardIndefinitely,
+                                  bool isRadio)
 {
   kodi::Log(ADDON_LOG_DEBUG,
             "[PLAY STREAM] url=%s realtime=%s playTimeshiftBuffer=%s mode=%s start=%lld end=%lld",
@@ -1099,6 +1157,23 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
             static_cast<long long>(endtime));
 
   int inputstream = m_settings->GetInputstream();
+
+  // Kodi plays radio channels through PAPlayer, its audio player, which has no
+  // inputstream-addon support at all -- it hands the stream URL straight to
+  // its own decoder. Confirmed with BOTH addons: inputstream.adaptive even
+  // parses the manifest and opens the AAC decoder successfully, and PAPlayer
+  // still rejects the file with "CAudioDecoder: Unable to Init Codec" /
+  // "PAPlayer::QueueNextFileEx - Failed to create the decoder". So for radio
+  // set only the stream URL and let Kodi's internal ffmpeg handle it.
+  if (isRadio)
+  {
+    kodi::Log(ADDON_LOG_INFO,
+              "Radio channel: no inputstream addon (PAPlayer cannot use them)");
+    properties.emplace_back(PVR_STREAM_PROPERTY_STREAMURL, url);
+    properties.emplace_back(PVR_STREAM_PROPERTY_ISREALTIMESTREAM,
+                            realtime ? "true" : "false");
+    return;
+  }
 
   // Live uses the catchup seek proxy under the same condition GetStreamProperties
   // used to decide whether to start it (see there) -- both must agree on this to
@@ -1124,7 +1199,7 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
   // UA, which gets blocked by the CDN the same way issue #16 describes.
   std::string streamUrlForProperty = url;
   if (inputstream == INPUTSTREAM_FFMPEGDIRECT)
-    streamUrlForProperty += "|User-Agent=" + Utils::UrlEncode(EonParameters[m_platform].user_agent);
+    streamUrlForProperty += "|User-Agent=" + Utils::UrlEncode(GetUserAgent());
 
   properties.emplace_back(PVR_STREAM_PROPERTY_STREAMURL, streamUrlForProperty);
   properties.emplace_back(PVR_STREAM_PROPERTY_ISREALTIMESTREAM, effectiveRealtime ? "true" : "false");
@@ -1145,7 +1220,7 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
     properties.emplace_back("inputstream.adaptive.stream_selection_type", "fixed-res");
     properties.emplace_back("inputstream.adaptive.chooser_resolution_max", "4K");
     //properties.emplace_back("inputstream.adaptive.stream_selection_type", "fixed-res");
-    properties.emplace_back("inputstream.adaptive.manifest_headers", "User-Agent=" + EonParameters[m_platform].user_agent);
+    properties.emplace_back("inputstream.adaptive.manifest_headers", "User-Agent=" + GetUserAgent());
     // properties.emplace_back("inputstream.adaptive.manifest_update_parameter", "full");
   } else if (inputstream == INPUTSTREAM_FFMPEGDIRECT)
   {
@@ -1278,6 +1353,8 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
   streaming_profile = getCoreStreamId(current_id);
   result.streamProfile = streaming_profile;
   result.bitrate = static_cast<int>(rndbitrate);
+  const unsigned int videobitrate = static_cast<unsigned int>(getVideoBitrate(current_id));
+  result.videoBitrate = static_cast<int>(videobitrate);
   kodi::Log(ADDON_LOG_DEBUG, "Channel Rendering Profile -> %u", current_id);
 
   m_session_id = Utils::CreateUUID();
@@ -1304,9 +1381,10 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
                 "device=" + m_settings->GetEonDeviceNumber() + ";" + "ctime=" + GetTime() + ";" +
                 "lang=eng;player=" + PLAYER + ";" +
                 "aa=" + (channel.aaEnabled ? "true" : "false") + ";" +
-                "conn=" + CONN_TYPE_ETHERNET + ";" + "minvbr=100;" +
+                "conn=" + CONN_TYPE_ETHERNET + ";" +
+                "minvbr=" + std::to_string(std::min(100u, videobitrate)) + ";" +
                 "ss=" + m_settings->GetEonStreamKey() + ";" + "session=" + m_session_id + ";" +
-                "maxvbr=" + std::to_string(rndbitrate);
+                "maxvbr=" + std::to_string(videobitrate);
     if (!isLive)
       plain_aes = plain_aes + ";t=" + std::to_string(static_cast<int>(starttime)) + "000;";
   }
@@ -1315,7 +1393,8 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
     plain_aes = "channel=" + channel.publishingPoints[0].publishingPoint + ";" +
                 "stream=" + streaming_profile + ";" + "sp=" + m_service_provider + ";" +
                 "u=" + m_settings->GetEonStreamUser() + ";" +
-                "ss=" + m_settings->GetEonStreamKey() + ";" + "minvbr=100;" +
+                "ss=" + m_settings->GetEonStreamKey() + ";" +
+                "minvbr=" + std::to_string(std::min(100u, videobitrate)) + ";" +
                 "sig=" + channel.sig + ";" + "session=" + m_session_id + ";" +
                 "m=" + currentServer.ip + ";" + "device=" + m_settings->GetEonDeviceNumber() +
                 ";" + "ctime=" + GetTime() + ";" + "conn=" + CONN_TYPE_BROWSER + ";";
@@ -1365,6 +1444,17 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
 
   kodi::Log(ADDON_LOG_DEBUG, "Encrypted Stream URL -> %s", result.url.c_str());
 
+  // Body of the last playlist we already fetched below, if any. Every GET on
+  // the /stream endpoint opens a CDN session, and EON caps how many may be
+  // open at once ("403.5300 / Streamable bandwidth exceeded"). The quality
+  // override and the diagnostics block used to fetch independently, so a
+  // single tune-in burned up to three sessions before inputstream even
+  // started -- which is why playback froze on "highest bitrate" but not on
+  // "default". Fetch at most once and share the result.
+  std::string fetchedPlaylist;
+  bool havePlaylist = false;
+  bool overrodeUrl = false;
+
   const int ffmpegdirectQuality = m_settings->GetFfmpegdirectQuality();
   if (m_settings->GetInputstream() == INPUTSTREAM_FFMPEGDIRECT && ffmpegdirectQuality != 0)
   {
@@ -1374,9 +1464,11 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
     // fetch the master playlist ourselves and rewrite the stream URL to the
     // chosen variant's own playlist URL directly.
     Curl qualityCurl;
-    qualityCurl.AddHeader("User-Agent", EonParameters[m_platform].user_agent);
+    qualityCurl.AddHeader("User-Agent", GetUserAgent());
     int qualityStatus = 0;
     const std::string masterPlaylist = qualityCurl.Get(result.url, qualityStatus);
+    fetchedPlaylist = masterPlaylist;
+    havePlaylist = true;
     const std::string variantUrl =
         Utils::SelectVariantPlaylistUrl(masterPlaylist, result.url, ffmpegdirectQuality);
     if (!variantUrl.empty())
@@ -1384,6 +1476,12 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
       kodi::Log(ADDON_LOG_INFO, "ffmpegdirect quality override (%s) -> %s",
                 ffmpegdirectQuality == 1 ? "highest" : "lowest", variantUrl.c_str());
       result.url = variantUrl;
+      // result.url now points at the variant, not the master we just read,
+      // so the cached body no longer describes it -- and re-fetching just to
+      // log it would cost another session. Skip diagnostics for this case.
+      havePlaylist = false;
+      overrodeUrl = true;
+      fetchedPlaylist.clear();
     }
     else
     {
@@ -1392,12 +1490,23 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
     }
   }
 
-  if (includeDiagnostics)
+  if (includeDiagnostics && !overrodeUrl)
   {
-    Curl manifestCurl;
-    manifestCurl.AddHeader("User-Agent", EonParameters[m_platform].user_agent);
+    std::string manifestBody;
     int manifestStatus = 0;
-    const std::string manifestBody = manifestCurl.Get(result.url, manifestStatus);
+    if (havePlaylist)
+    {
+      // Already fetched above for the quality override, and result.url is
+      // unchanged -- log it without opening a second CDN session.
+      manifestBody = fetchedPlaylist;
+      manifestStatus = 200;
+    }
+    else
+    {
+      Curl manifestCurl;
+      manifestCurl.AddHeader("User-Agent", GetUserAgent());
+      manifestBody = manifestCurl.Get(result.url, manifestStatus);
+    }
     kodi::Log(ADDON_LOG_INFO,
               "%s manifest fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
               isLive ? "Live" : "Replay",
@@ -1407,20 +1516,13 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
               BoolState(manifestBody.find("#EXT-X-PLAYLIST-TYPE:EVENT") != std::string::npos),
               PreviewForLog(manifestBody).c_str());
 
+    // The nested variant fetch that used to follow here was purely for the
+    // log and cost another CDN session on every single tune-in. The variant
+    // URL alone is enough to diagnose selection problems.
     const std::string variantUrl = FirstVariantPlaylistUrl(manifestBody, result.url);
     if (!variantUrl.empty())
-    {
-      int variantStatus = 0;
-      const std::string variantBody = manifestCurl.Get(variantUrl, variantStatus);
-      kodi::Log(ADDON_LOG_INFO,
-                "%s variant fetch. status=%i bodyLen=%zu extinf=%zu endlist=%s vod=%s event=%s preview=%s",
-                isLive ? "Live" : "Replay",
-                variantStatus, variantBody.size(), CountOccurrences(variantBody, "#EXTINF"),
-                BoolState(variantBody.find("#EXT-X-ENDLIST") != std::string::npos),
-                BoolState(variantBody.find("#EXT-X-PLAYLIST-TYPE:VOD") != std::string::npos),
-                BoolState(variantBody.find("#EXT-X-PLAYLIST-TYPE:EVENT") != std::string::npos),
-                PreviewForLog(variantBody).c_str());
-    }
+      kodi::Log(ADDON_LOG_INFO, "%s first variant playlist: %s",
+                isLive ? "Live" : "Replay", variantUrl.c_str());
   }
 
   return true;
@@ -1429,6 +1531,14 @@ bool CPVREon::BuildPlaybackUrl(const EonChannel& channel,
 bool CPVREon::UseExperimentalNativeStream() const
 {
   return m_settings->UseExperimentalNativeStream() && m_platform == PLATFORM_WEB;
+}
+
+const std::string& CPVREon::GetUserAgent() const
+{
+  if (m_settings->UseCustomUserAgent() && !m_settings->GetCustomUserAgent().empty())
+    return m_settings->GetCustomUserAgent();
+
+  return EonParameters[m_platform].user_agent;
 }
 
 bool CPVREon::OpenNativeStream(const EonChannel& channel,
@@ -1572,7 +1682,7 @@ bool CPVREon::UpdateNativeVariantUrl(bool logErrors)
     return false;
 
   Curl manifestCurl;
-  manifestCurl.AddHeader("User-Agent", EonParameters[m_platform].user_agent);
+  manifestCurl.AddHeader("User-Agent", GetUserAgent());
   int manifestStatus = 0;
   const std::string manifestBody = manifestCurl.Get(m_nativeStream.masterUrl, manifestStatus);
   if (manifestStatus != 200 && manifestStatus != 206)
@@ -1607,7 +1717,7 @@ bool CPVREon::PollNativeFragmentQueue(bool forceRefresh)
     return false;
 
   Curl playlistCurl;
-  playlistCurl.AddHeader("User-Agent", EonParameters[m_platform].user_agent);
+  playlistCurl.AddHeader("User-Agent", GetUserAgent());
   int playlistStatus = 0;
   const std::string playlistBody = playlistCurl.Get(m_nativeStream.variantUrl, playlistStatus);
   if (playlistStatus != 200 && playlistStatus != 206)
@@ -1725,7 +1835,7 @@ bool CPVREon::FetchBinaryUrl(const std::string& url, std::vector<uint8_t>& data,
     return false;
   }
 
-  file.CURLAddOption(ADDON_CURL_OPTION_HEADER, "User-Agent", EonParameters[m_platform].user_agent);
+  file.CURLAddOption(ADDON_CURL_OPTION_HEADER, "User-Agent", GetUserAgent());
   file.CURLAddOption(ADDON_CURL_OPTION_PROTOCOL, "failonerror", "false");
   if (!file.CURLOpen(ADDON_READ_NO_CACHE))
   {
@@ -1873,11 +1983,35 @@ PVR_ERROR CPVREon::GetEPGForChannel(int channelUid,
     if (channel.iUniqueId != channelUid)
       continue;
 
-    kodi::Log(ADDON_LOG_DEBUG, "EPG Request for Channel %u Start %u End %u", channel.iUniqueId, start, end);
+    kodi::Log(ADDON_LOG_DEBUG, "EPG Request for Channel %u Start %lld End %lld", channel.iUniqueId,
+              static_cast<long long>(start), static_cast<long long>(end));
+
+    // EON keeps a rolling 7-day archive and answers anything reaching further
+    // back with HTTP 400 "invalid_input". Kodi derives the requested range
+    // from its "days to display" setting and can ask for slightly more than
+    // that (it schedules a table update once and then retries the very same
+    // absolute range for hours, so the start only drifts further out of
+    // range), which fails the whole request even though the bulk of it is
+    // perfectly servable.
+    const time_t oldestAvailable = time(nullptr) - EPG_ARCHIVE_SECONDS;
+    const time_t fromTime = std::max(start, oldestAvailable);
+
+    if (end <= fromTime)
+    {
+      kodi::Log(ADDON_LOG_DEBUG,
+                "[epg] channel %u: requested range lies entirely outside the archive window",
+                channel.iUniqueId);
+      return PVR_ERROR_NO_ERROR;
+    }
+
+    if (fromTime != start)
+      kodi::Log(ADDON_LOG_DEBUG, "[epg] channel %u: clamped start %lld to %lld",
+                channel.iUniqueId, static_cast<long long>(start),
+                static_cast<long long>(fromTime));
 
     std::string url = m_api + "v1/events/epg" +
                               "?cid=" + std::to_string(channel.iUniqueId) +
-                              "&fromTime=" + std::to_string(start) + "000" +
+                              "&fromTime=" + std::to_string(fromTime) + "000" +
                               "&toTime=" + std::to_string(end) + "000";
 
     // Kodi calls this in the background to populate the EPG grid, often for
@@ -2135,7 +2269,11 @@ PVR_ERROR CPVREon::GetStreamProperties(
 
     bool catchupProxyReady = false;
     int proxySessionId = 0;
-    if (endtime > starttime && m_settings->GetInputstream() == INPUTSTREAM_FFMPEGDIRECT)
+    // !channel.bRadio must mirror the radio override in SetStreamProperties:
+    // radio never reaches the ffmpegdirect branch there, so starting the seek
+    // proxy for it would leave the two out of sync and waste a CDN session.
+    if (!channel.bRadio && endtime > starttime &&
+        m_settings->GetInputstream() == INPUTSTREAM_FFMPEGDIRECT)
     {
       // Reuse the exact server BuildPlaybackUrl already picked for the
       // original URL. Calling GetServer() again here independently can
@@ -2155,11 +2293,12 @@ PVR_ERROR CPVREon::GetStreamProperties(
       sp.aaEnabled = channel.aaEnabled;
       sp.platform = m_platform;
       sp.maxBitrate = static_cast<unsigned int>(playback.bitrate);
+      sp.videoBitrate = static_cast<unsigned int>(playback.videoBitrate);
       // The CDN rejects a stale ctime (>~20s old), so the proxy fetches
       // this fresh for every seek rather than relying on a cached offset.
       sp.apiTimeUrl = m_api + "v1/time";
       sp.accessToken = m_settings->GetEonAccessToken();
-      sp.userAgent = EonParameters[m_platform].user_agent;
+      sp.userAgent = GetUserAgent();
       sp.qualityPreference = m_settings->GetFfmpegdirectQuality();
 
       // Deliberately no Stop() first: Kodi can have a second stream open in
@@ -2185,7 +2324,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
     m_live_using_catchup = (isLive || playForwardIndefinitely) && catchupProxyReady;
 
     SetStreamProperties(properties, playback.url, isLive, false, isLive, starttime, endtime,
-                         catchupProxyReady, playForwardIndefinitely);
+                         catchupProxyReady, playForwardIndefinitely, channel.bRadio);
 
     if (catchupProxyReady)
     {
@@ -2194,7 +2333,7 @@ PVR_ERROR CPVREon::GetStreamProperties(
       // from whichever URL becomes m_streamUrl, including the catchup
       // format string and this fallback default_url, not just the initial
       // PVR_STREAM_PROPERTY_STREAMURL.
-      const std::string uaSuffix = "|User-Agent=" + Utils::UrlEncode(EonParameters[m_platform].user_agent);
+      const std::string uaSuffix = "|User-Agent=" + Utils::UrlEncode(GetUserAgent());
       const std::string proxyBase = "http://127.0.0.1:" +
                                     std::to_string(m_redirectProxy.GetPort()) + "/stream?s=" +
                                     std::to_string(proxySessionId) + "&t=";

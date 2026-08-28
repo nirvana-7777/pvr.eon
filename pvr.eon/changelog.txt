@@ -1,3 +1,35 @@
+v21.8.6
+  - Fix all radio channels except Stingray failing with a 403 error. minvbr
+    and maxvbr are video bitrate bounds, but were being filled from the audio
+    bitrate on radio channels, so audio-only profiles asked the CDN for video
+    that does not exist
+  - Fix radio channels being signed with an empty signature: their
+    publishing points only advertise a "radio" player config, never a "live"
+    one, which was the only type being read
+  - Update the service provider list to match EON's own: SBB, Telemach,
+    Telemach HR, Telemach SI, Vivacom, Nova. NetTV Plus and EON Hrvatska no
+    longer exist as brands
+  - Fix providers resolving to the wrong CDN after the broker changed its
+    brand list: entries with no identifier of their own fell back to
+    whatever brand sat at the same position, which no longer matched.
+    Brands are now matched by their own identifier, and an unknown one
+    falls back to the CDN the broker marks as default
+  - Fix the EPG failing with "invalid_input" when Kodi requests a range
+    reaching past EON's 7-day archive; the request is now clamped to what
+    the archive actually holds
+  - Add an optional custom User-Agent setting
+  - Fix a shutdown race in the seek proxy that could corrupt memory: the
+    listening socket was closed from one thread while another was still
+    selecting on it
+  - Add a connection timeout to all HTTP requests, which previously had none
+  - Add Serbian, Croatian, Bosnian, Slovenian, Macedonian and Greek translations
+  - Small organisational and cosmetic fixes
+
+  NOTE: the provider list order has changed. If you had Vivacom selected, or
+  were using NetTV Plus as a workaround to log in to a Vivacom account, open
+  the add-on settings and select your provider again. Vivacom accounts now
+  work with Vivacom selected. EON Hrvatska has been replaced by Telemach HR.
+
 v21.8.5
   - Fix being unable to return to live TV from the guide: while a replay show
     was playing, selecting the channel's currently airing programme did
@@ -41,35 +73,36 @@ v21.8.0
   - Add seeking (fast-forward/rewind) for replay/catchup content
   - Fix playback failures caused by the streaming CDN blocking the addon's
     User-Agent, affecting both live TV and replay/catchup (#16)
+
 v21.7.11
   - Maintenance release
-v21.5.0
-- Initial release
+v21.7.9
+  - Add bulgarian translation (Thx to CTEoloAH!)
+v21.7.8
+  - New Setting filter for channel age rating
+v21.7.7
+  - Fix refresh token when updating
+v21.7.6
+  - Try to fix armv7a
+v21.7.5
+  - Fix startup with empty credentials and web
+v21.7.4
+  - Exploit some more EPG data (live, age, seasons, episodes)
+v21.7.3
+  - Optionally use inputstream.ffmpegdirect
+v21.7.2
+  - Fix EPG date
+v21.7.1
+  - Adapt user agent header for platforms when streaming
+v21.7.0
+  - Add Android TV platform (e.g. BigScreen/4K)
+v21.6.1
+  - Switch from adaptive to manual-osd for inputstream
+  - Fix not subscribed channels leading to crash
 v21.6.0
 - Migrate from botan towards native AES and SHA256 implementations for:
   - better portability
   - faster compilation
   - less dependencies
-v21.6.1
-  - Switch from adaptive to manual-osd for inputstream
-  - Fix not subscribed channels leading to crash
-v21.7.0
-  - Add Android TV platform (e.g. BigScreen/4K)
-v21.7.1
-  - Adapt user agent header for platforms when streaming
-v21.7.2
-  - Fix EPG date
-v21.7.3
-  - Optionally use inputstream.ffmpegdirect
-v21.7.4
-  - Exploit some more EPG data (live, age, seasons, episodes)
-v21.7.5
-  - Fix startup with empty credentials and web
-v21.7.6
-  - Try to fix armv7a
-v21.7.7
-  - Fix refresh token when updating
-v21.7.8
-  - New Setting filter for channel age rating
-v21.7.9
-  - Add bulgarian translation (Thx to CTEoloAH!)
+v21.5.0
+- Initial release

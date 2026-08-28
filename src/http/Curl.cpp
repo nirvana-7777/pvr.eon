@@ -61,6 +61,11 @@ std::string Curl::Request(const std::string& action, const std::string& url, con
 
   file.CURLAddOption(ADDON_CURL_OPTION_PROTOCOL, "customrequest", action);
   file.CURLAddOption(ADDON_CURL_OPTION_HEADER, "acceptencoding", "gzip");
+  // Without this a stalled response blocks the caller indefinitely.
+  // StreamRedirectProxy calls this synchronously on its single accept-loop
+  // thread for every seek, so an unbounded wait there stops the proxy
+  // answering anything at all.
+  file.CURLAddOption(ADDON_CURL_OPTION_PROTOCOL, "connection-timeout", "8");
   if (!postData.empty())
   {
     std::string base64 = Base64Encode((const unsigned char *) postData.c_str(),

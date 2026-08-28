@@ -3,7 +3,7 @@ set -euo pipefail
 
 : "${PVR_EON_ID:=pvr.eon}"
 : "${XBMC_REF:=origin/Omega}"
-: "${BUILD_TYPE:=Debug}"
+: "${BUILD_TYPE:=Release}"
 
 src_root=/src
 work_root=/tmp/pvr-eon-build

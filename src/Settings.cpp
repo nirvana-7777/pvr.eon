@@ -170,6 +170,15 @@ bool CSettings::Load()
     return false;
   }
 
+  /* EonParameters[] in Globals.h only has entries 0 (Web) and 1 (Android TV).
+     Guard against an out-of-range value (e.g. LG WebOS left over in an existing
+     settings.xml) which would otherwise read past the end of the array. */
+  if (m_eonPlatform < 0 || m_eonPlatform > 1)
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Unsupported platform %i selected, falling back to Web", m_eonPlatform);
+    m_eonPlatform = 0;
+  }
+
   if (!kodi::addon::CheckSettingInt("inputstream", m_eonInputstream))
   {
     /* If setting is unknown fallback to defaults */
@@ -188,6 +197,20 @@ bool CSettings::Load()
   {
     /* If setting is unknown fallback to defaults */
     kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'agerating' setting");
+    return false;
+  }
+
+  if (!kodi::addon::CheckSettingBoolean("usecustomuseragent", m_useCustomUserAgent))
+  {
+    /* If setting is unknown fallback to defaults */
+    kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'usecustomuseragent' setting");
+    return false;
+  }
+
+  if (!kodi::addon::CheckSettingString("customuseragent", m_customUserAgent))
+  {
+    /* If setting is unknown fallback to defaults */
+    kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'customuseragent' setting");
     return false;
   }
 
@@ -367,6 +390,16 @@ ADDON_STATUS CSettings::SetSetting(const std::string& settingName,
     if (previous != m_experimentalNativeStream)
       return ADDON_STATUS_NEED_RESTART;
   }
+  else if (settingName == "usecustomuseragent")
+  {
+    kodi::Log(ADDON_LOG_DEBUG, "Changed Setting 'usecustomuseragent'");
+    m_useCustomUserAgent = settingValue == "true";
+  }
+  else if (settingName == "customuseragent")
+  {
+    kodi::Log(ADDON_LOG_DEBUG, "Changed Setting 'customuseragent'");
+    m_customUserAgent = settingValue;
+  }
 
   return ADDON_STATUS_OK;
 }
@@ -375,9 +408,13 @@ bool CSettings::VerifySettings() {
   std::string username = GetEonUsername();
   std::string password = GetEonPassword();
   if (username.empty() || password.empty()) {
+    // No notification here: SetSetting() calls this for every individual
+    // setting Kodi hands over, so warning from inside would put one popup on
+    // screen per change while the user is still filling the form in. The
+    // startup check in CPVREon's constructor shows it once instead, and
+    // SetSetting's ADDON_STATUS_NEED_SETTINGS already keeps Kodi's settings
+    // dialog open on its own.
     kodi::Log(ADDON_LOG_INFO, "Username or password not set.");
-    kodi::QueueNotification(QUEUE_WARNING, "", kodi::addon::GetLocalizedString(30200));
-
     return false;
   }
   return true;

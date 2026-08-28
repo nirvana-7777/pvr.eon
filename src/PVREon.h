@@ -214,6 +214,9 @@ private:
     std::string url;
     std::string streamProfile;
     int bitrate = 0;
+    // Video bitrate of the chosen profile, kept separate from `bitrate`
+    // (which is the audio bitrate on radio channels) for minvbr/maxvbr.
+    int videoBitrate = 0;
     std::string serverIp;
     std::string serverHostname;
   };
@@ -226,7 +229,8 @@ private:
                            time_t starttime,
                            time_t endtime,
                            bool catchupProxyReady,
-                           bool playForwardIndefinitely = false);
+                           bool playForwardIndefinitely = false,
+                           bool isRadio = false);
   bool BuildPlaybackUrl(const EonChannel& channel,
                         time_t starttime,
                         time_t endtime,
@@ -234,6 +238,7 @@ private:
                         EonPlaybackUrlResult& result,
                         const bool includeDiagnostics = true);
   bool UseExperimentalNativeStream() const;
+  const std::string& GetUserAgent() const;
   bool OpenNativeStream(const EonChannel& channel,
                         bool isLive,
                         time_t starttime,
@@ -315,6 +320,7 @@ private:
 
   std::string GetTime();
   int getBitrate(const bool isRadio, const int id);
+  int getVideoBitrate(const int id);
   bool GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc,
                     bool showErrorDialog = true);
   std::string getCoreStreamId(const int id);
