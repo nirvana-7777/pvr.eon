@@ -45,13 +45,16 @@ public:
   const bool IsGroupsenabled() const  { return m_enablegroups; }
   const bool UseShortNames() const  { return m_shortnames; }
   const bool UseExperimentalNativeStream() const { return m_experimentalNativeStream; }
+  const bool UseCustomUserAgent() const { return m_useCustomUserAgent; }
+  const std::string& GetCustomUserAgent() const { return m_customUserAgent; }
 
 private:
-  int m_eonServiceProvider;
-  int m_eonPlatform;
-  int m_eonInputstream;
-  int m_eonFfmpegdirectQuality;
-  int m_eonAgeRating;
+  int m_eonServiceProvider = 0;
+  int m_eonPlatform = 0;
+  int m_eonInputstream = 0;
+  int m_eonFfmpegdirectQuality = 0;
+  int m_start_num = 1;
+  int m_eonAgeRating = 18;
   std::string m_eonUsername;
   std::string m_eonPassword;
   std::string m_eonAccessToken;
@@ -66,11 +69,12 @@ private:
   std::string m_SS_AccessToken;
   std::string m_SS_RefreshToken;
   std::string m_SS_Identity;
-  int m_start_num;
-  bool m_hideunsubscribed;
-  bool m_enabletv;
-  bool m_enableradio;
-  bool m_enablegroups;
-  bool m_shortnames;
-  bool m_experimentalNativeStream;
+  std::string m_customUserAgent;
+  bool m_hideunsubscribed = false;
+  bool m_enabletv = true;
+  bool m_enableradio = true;
+  bool m_enablegroups = true;
+  bool m_shortnames = false;
+  bool m_experimentalNativeStream = false;
+  bool m_useCustomUserAgent = false;
 };

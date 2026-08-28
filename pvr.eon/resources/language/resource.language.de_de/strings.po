@@ -1,41 +1,27 @@
 # Kodi Media Center language file
-# Addon Name: PVR EON Client
+# Addon Name: EON PVR Client
 # Addon id: pvr.eon
-# Addon Provider: Pulse-Eight Ltd.
+# Addon Provider:
+
 msgid ""
 msgstr ""
-"Project-Id-Version: KODI Main\n"
-"Report-Msgid-Bugs-To: http://trac.kodi.tv/\n"
-"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: Automatically generated\n"
-"Language-Team: none\n"
+
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: \n"
+"PO-Revision-Date: \n"
+"Last-Translator: \n"
+"Language-Team: \n"
 "Language: de_de\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=n != 1;\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-msgctxt "Addon Summary"
-msgid "EON PVR Client"
-msgstr "EON PVR Client"
-
-msgctxt "Addon Description"
-msgid "PVR Client for HRTi platform which allows you to watch live HRT TV channels and listening HRT radio stations."
-msgstr ""
-
-msgctxt "Addon Disclaimer"
-msgid "Inofficial Addon - Use on own risk"
-msgstr "Inoffizielles Addon - Benutzung auf eigene Gefahr"
-
-#. Setting to set used stream username
-#: pvr.hrti/resources/settings.xml
 msgctxt "#30000"
 msgid "Username"
 msgstr "Benutzername"
 
-#. Setting to set used stream password
-#: pvr.hrti/resources/settings.xml
 msgctxt "#30001"
 msgid "Password"
 msgstr "Passwort"
@@ -50,11 +36,11 @@ msgstr "Access Token"
 
 msgctxt "#30004"
 msgid "Device ID"
-msgstr "Geraete ID"
+msgstr "Geräte-ID"
 
 msgctxt "#30005"
 msgid "Device Number"
-msgstr "Geraetenummer"
+msgstr "Gerätenummer"
 
 msgctxt "#30006"
 msgid "Refresh Token"
@@ -66,35 +52,31 @@ msgstr "Subscriber ID"
 
 msgctxt "#30008"
 msgid "Stream Key"
-msgstr "Stream Schluessel"
+msgstr "Stream-Schlüssel"
 
 msgctxt "#30009"
 msgid "Stream User"
 msgstr "Stream Nutzer"
 
-#. Settings category label
-#: pvr.hrti/resources/settings.xml
+msgctxt "#30010"
+msgid "PVR client menu hook item (settings) called."
+msgstr "PVR-Client Menüeintrag (Einstellungen) aufgerufen."
+
+msgctxt "#30011"
+msgid "PVR client menu hook item (all items) called"
+msgstr "PVR-Client Menüeintrag (alle Einträge) aufgerufen"
+
+msgctxt "#30012"
+msgid "PVR client menu hook item (channels) called"
+msgstr "PVR-Client Menüeintrag (Sender) aufgerufen"
+
 msgctxt "#30014"
 msgid "Credentials"
 msgstr "Zugangsdaten"
 
-#. Settings group label
-#: pvr.hrti/resources/settings.xml
 msgctxt "#30015"
 msgid "eon.tv"
 msgstr "eon.tv"
-
-msgctxt "#30010"
-msgid "PVR client menu hook item (settings) called."
-msgstr ""
-
-msgctxt "#30011"
-msgid "PVR client menu hook item (all items) called"
-msgstr ""
-
-msgctxt "#30012"
-msgid "PVR client menu hook item (channels) called"
-msgstr ""
 
 msgctxt "#30020"
 msgid "Hide not subscribed channels"
@@ -142,7 +124,7 @@ msgstr "Self Service Identity"
 
 msgctxt "#30031"
 msgid "Device Serial"
-msgstr "Geraeteseriennummer"
+msgstr "Geräteseriennummer"
 
 msgctxt "#30032"
 msgid "Generic Access Token"
@@ -165,16 +147,16 @@ msgid "Telemach"
 msgstr "Telemach"
 
 msgctxt "#30037"
-msgid "NetTV Plus"
-msgstr "NetTV Plus"
+msgid "Telemach HR"
+msgstr "Telemach HR"
 
 msgctxt "#30038"
-msgid "Vivacom"
-msgstr "Vivacom"
+msgid "Telemach SI"
+msgstr "Telemach SI"
 
 msgctxt "#30039"
-msgid "EON Hrvatska"
-msgstr "EON Hrvatska"
+msgid "Vivacom"
+msgstr "Vivacom"
 
 msgctxt "#30040"
 msgid "Nova"
@@ -186,15 +168,15 @@ msgstr "Plattform"
 
 msgctxt "#30042"
 msgid "Web"
-msgstr ""
+msgstr "Web"
 
 msgctxt "#30043"
 msgid "Android TV"
-msgstr ""
+msgstr "Android TV"
 
 msgctxt "#30044"
 msgid "WebOS"
-msgstr ""
+msgstr "WebOS"
 
 msgctxt "#30045"
 msgid "Use short channel names"
@@ -205,12 +187,12 @@ msgid "Please enter OTP to register device"
 msgstr "Bitte OTP eingeben um das Gerät zu registrieren"
 
 msgctxt "#30047"
-msgid "Im Service Provider Self Service Portal Geräte auswählen und den 6-stelligen Code eingeben. Mit OK beenden. Sie haben noch "
-msgstr ""
+msgid "Please go to your service provider's self service portal, click the devices tab and enter the above 6-digit code. Click OK when finished. You have "
+msgstr "Im Service Provider Self Service Portal Geräte auswählen und den 6-stelligen Code eingeben. Mit OK beenden. Sie haben noch "
 
 msgctxt "#30048"
-msgid "min Zeit."
-msgstr ""
+msgid "min left."
+msgstr "min Zeit."
 
 msgctxt "#30049"
 msgid "Streaming"
@@ -248,14 +230,43 @@ msgctxt "#30057"
 msgid "Experimental native archive streaming"
 msgstr "Experimentelles natives Archiv-Streaming"
 
+msgctxt "#30058"
+msgid "ffmpegdirect Quality"
+msgstr "ffmpegdirect Qualität"
+
+msgctxt "#30059"
+msgid "Default"
+msgstr "Standard"
+
+msgctxt "#30060"
+msgid "Highest bitrate"
+msgstr "Höchste Bitrate"
+
+msgctxt "#30061"
+msgid "Lowest bitrate"
+msgstr "Niedrigste Bitrate"
+
+msgctxt "#30100"
+msgid "Use custom User-Agent"
+msgstr "Benutzerdefinierten User-Agent verwenden"
+
+msgctxt "#30101"
+msgid "Custom User-Agent"
+msgstr "Benutzerdefinierter User-Agent"
+
+msgctxt "#30102"
+msgid "Device Registration (Optional)"
+msgstr "Geräteregistrierung (optional)"
+
+
 msgctxt "#30500"
 msgid "Inputstream error"
 msgstr "Inputstream Fehler"
 
 msgctxt "#30501"
 msgid "The %s addon is not installed."
-msgstr "Das %s Addon ist nicht installiert"
+msgstr "Das %s Addon ist nicht installiert."
 
 msgctxt "#30502"
 msgid "The %s addon is not enabled."
-msgstr "Das %s Addon ist nicht aktiviert"
+msgstr "Das %s Addon ist nicht aktiviert."

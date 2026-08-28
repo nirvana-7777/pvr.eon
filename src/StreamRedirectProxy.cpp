@@ -14,6 +14,7 @@
 
 #include <kodi/General.h>
 
+#include <algorithm>
 #include <cstring>
 #include <sstream>
 
@@ -150,6 +151,14 @@ bool StreamRedirectProxy::Start()
     return false;
   }
 
+  if (pipe(m_wakePipe) < 0)
+  {
+    kodi::Log(ADDON_LOG_ERROR, "StreamRedirectProxy: failed to create wake pipe");
+    close(m_serverSocket);
+    m_serverSocket = -1;
+    return false;
+  }
+
   m_running = true;
   m_thread = std::thread(&StreamRedirectProxy::ServerThread, this);
 
@@ -164,15 +173,26 @@ void StreamRedirectProxy::Stop()
 
   m_running = false;
 
-  if (m_serverSocket >= 0)
+  // Wake ServerThread's select() without touching m_serverSocket -- see the
+  // m_wakePipe comment in the header.
+  if (m_wakePipe[1] >= 0)
   {
-    shutdown(m_serverSocket, SHUT_RDWR);
-    close(m_serverSocket);
-    m_serverSocket = -1;
+    const char wake = 'x';
+    const ssize_t written = write(m_wakePipe[1], &wake, 1);
+    (void)written;
   }
 
   if (m_thread.joinable())
     m_thread.join();
+
+  for (int& fd : m_wakePipe)
+  {
+    if (fd >= 0)
+    {
+      close(fd);
+      fd = -1;
+    }
+  }
 
   kodi::Log(ADDON_LOG_INFO, "StreamRedirectProxy: stopped");
 }
@@ -219,21 +239,43 @@ void StreamRedirectProxy::ServerThread()
 {
   while (m_running)
   {
+    const int listenFd = m_serverSocket;
+    const int wakeFd = m_wakePipe[0];
+    if (listenFd < 0)
+      break;
+
     fd_set readfds;
     FD_ZERO(&readfds);
-    FD_SET(m_serverSocket, &readfds);
+    FD_SET(listenFd, &readfds);
+    if (wakeFd >= 0)
+      FD_SET(wakeFd, &readfds);
 
     struct timeval tv;
     tv.tv_sec = 1;
     tv.tv_usec = 0;
 
-    int ret = select(m_serverSocket + 1, &readfds, nullptr, nullptr, &tv);
+    int ret = select(std::max(listenFd, wakeFd) + 1, &readfds, nullptr, nullptr, &tv);
     if (ret <= 0)
       continue;
 
-    int clientSocket = accept(m_serverSocket, nullptr, nullptr);
+    // Stop() asked us to exit.
+    if (wakeFd >= 0 && FD_ISSET(wakeFd, &readfds))
+      break;
+
+    if (!FD_ISSET(listenFd, &readfds))
+      continue;
+
+    int clientSocket = accept(listenFd, nullptr, nullptr);
     if (clientSocket < 0)
       continue;
+
+    // A client that connects but never finishes its request (or never reads
+    // the reply) must not stall the only thread accepting connections.
+    struct timeval clientTimeout;
+    clientTimeout.tv_sec = 5;
+    clientTimeout.tv_usec = 0;
+    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &clientTimeout, sizeof(clientTimeout));
+    setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, &clientTimeout, sizeof(clientTimeout));
 
     char buf[2048];
     int bytesRead = static_cast<int>(recv(clientSocket, buf, sizeof(buf) - 1, 0));
@@ -317,6 +359,14 @@ void StreamRedirectProxy::ServerThread()
     send(clientSocket, response.c_str(), response.size(), 0);
     close(clientSocket);
   }
+
+  // Owned solely by this thread -- see the m_wakePipe comment in the header.
+  if (m_serverSocket >= 0)
+  {
+    shutdown(m_serverSocket, SHUT_RDWR);
+    close(m_serverSocket);
+    m_serverSocket = -1;
+  }
 }
 
 namespace
@@ -346,10 +396,10 @@ std::string BuildEncryptedUrlForSession(const StreamParams& params, time_t times
                 "lang=eng;player=" + kPlayer + ";"
                 "aa=" + (params.aaEnabled ? "true" : "false") + ";"
                 "conn=" + kConnTypeEthernet + ";"
-                "minvbr=100;"
+                "minvbr=" + std::to_string(std::min(100u, params.videoBitrate)) + ";"
                 "ss=" + params.streamKey + ";"
                 "session=" + sessionId + ";"
-                "maxvbr=" + std::to_string(params.maxBitrate) + ";";
+                "maxvbr=" + std::to_string(params.videoBitrate) + ";";
     if (!isLiveRequest)
       plain_aes += "t=" + std::to_string(static_cast<long long>(timestamp)) + "000;";
   }
@@ -364,7 +414,7 @@ std::string BuildEncryptedUrlForSession(const StreamParams& params, time_t times
                 "sp=" + params.serviceProvider + ";"
                 "u=" + params.streamUser + ";"
                 "ss=" + params.streamKey + ";"
-                "minvbr=100;"
+                "minvbr=" + std::to_string(std::min(100u, params.videoBitrate)) + ";"
                 "sig=" + params.sig + ";"
                 "session=" + sessionId + ";"
                 "m=" + params.serverIp + ";"

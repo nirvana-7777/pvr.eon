@@ -32,6 +32,10 @@ struct StreamParams
   bool aaEnabled = false;
   int platform = 0;
   unsigned int maxBitrate = 0;
+  // Video bitrate of the selected profile. minvbr/maxvbr are video bounds, so
+  // an audio-only profile must send 0 here -- see getVideoBitrate() comment in
+  // PVREon.cpp.
+  unsigned int videoBitrate = 0;
   // Used to fetch a fresh ctime for every seek (see BuildEncryptedUrl) --
   // the CDN rejects an encrypted URL if its embedded ctime is more than
   // ~20 seconds old, so a cached device-clock-relative offset isn't
@@ -88,6 +92,13 @@ private:
 
   int m_port = 0;
   int m_serverSocket = -1;
+  // Self-pipe used to wake ServerThread's select() from Stop(). Closing
+  // m_serverSocket from the stopping thread instead raced with ServerThread's
+  // own use of it: it could FD_SET(-1) (undefined behaviour -- FD_SET indexes
+  // the fd_set bitmap, so a negative fd writes out of bounds) or accept() on a
+  // descriptor number the OS had already reused. ServerThread alone owns
+  // m_serverSocket and closes it when the loop exits.
+  int m_wakePipe[2] = {-1, -1};
   std::atomic<bool> m_running{false};
   std::thread m_thread;
 

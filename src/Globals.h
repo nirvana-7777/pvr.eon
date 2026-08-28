@@ -56,19 +56,14 @@ static const EonParameter EonParameters[2] = {{
                                                 "be",
                                                 "web_linux_chrome",
                                                 "",
-                                                "Chrome 116",
+                                                "Chrome 150",
                                                 "web",
                                                 "",
                                                 "",
                                                 "",
                                                 "Linux",
                                                 "x86_64",
-                                                // CDN blocks desktop-browser User-Agents on HLS manifest/segment
-                                                // requests (see GitHub issue #16). Reuse the Android TV UA below
-                                                // for the actual stream fetches so they're recognized as a smart
-                                                // device; device_type/api_prefix stay "web" so login/session and
-                                                // the experimental native stream feature (Web-only) are unaffected.
-                                                "Mozilla/5.0 (Linux; Android 11; SHIELD Android TV Build/RQ1A.210105.003; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/114.0.5735.196 Mobile Safari/537.36; XDKAndroidWebView/3.0.1/XDKWebView NVIDIA NVIDIA/mdarcy/mdarcy:11/RQ1A.210105.003/7825230_3167.5736:user/release-keys NVIDIA AndroidTV 1.00A_ATV SHIELD Android TV Android/11 ExoPlayer ((1.00A_ATV::1.14.1::androidtv::)",
+                                                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
                                                 "b8d9ade4-1093-46a7-a4f7-0e47be463c10",
                                                 "1w4dmww87x1e9l89essqvc81pidrqsa0li1rva23"
                                               },
@@ -85,7 +80,7 @@ static const EonParameter EonParameters[2] = {{
                                                 "8.1.35906",
                                                 "Android",
                                                 "11",
-                                                "Mozilla/5.0 (Linux; Android 11; SHIELD Android TV Build/RQ1A.210105.003; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/114.0.5735.196 Mobile Safari/537.36; XDKAndroidWebView/3.0.1/XDKWebView NVIDIA NVIDIA/mdarcy/mdarcy:11/RQ1A.210105.003/7825230_3167.5736:user/release-keys NVIDIA AndroidTV 1.00A_ATV SHIELD Android TV Android/11 ExoPlayer ((1.00A_ATV::1.14.1::androidtv::)",
+                                                "Mozilla/5.0 (Linux; Android 11; SHIELD Android TV Build/RQ1A.210105.003; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/150.0.0.0 Mobile Safari/537.36; XDKAndroidWebView/3.0.1/XDKWebView NVIDIA NVIDIA/mdarcy/mdarcy:11/RQ1A.210105.003/7825230_3167.5736:user/release-keys NVIDIA AndroidTV 1.00A_ATV SHIELD Android TV Android/11 ExoPlayer ((1.00A_ATV::1.14.1::androidtv::)",                     
                                                 "5a3e24b8-70cd-4958-b716-af9ce053e594",
                                                 "aazy6orsi9elhhs17e47lfb4palgszw6igf4y26z"
                                               }

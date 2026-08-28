@@ -12,95 +12,95 @@ msgstr ""
 "PO-Revision-Date: \n"
 "Last-Translator: \n"
 "Language-Team: \n"
-"Language: bg_bg\n"
+"Language: mk_mk\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Plural-Forms: nplurals=2; plural=(n%10==1 && n%100!=11) ? 0 : 1;\n"
 
 msgctxt "#30000"
 msgid "Username"
-msgstr "Потребителско имe"
+msgstr "Корисничко име"
 
 msgctxt "#30001"
 msgid "Password"
-msgstr "Парола"
+msgstr "Лозинка"
 
 msgctxt "#30002"
 msgid "IP Address"
-msgstr "IP Адрес"
+msgstr "IP адреса"
 
 msgctxt "#30003"
 msgid "Access Token"
-msgstr "Токен за достъп"
+msgstr "Токен за пристап"
 
 msgctxt "#30004"
 msgid "Device ID"
-msgstr "Устройство ID"
+msgstr "ID на уредот"
 
 msgctxt "#30005"
 msgid "Device Number"
-msgstr "Устройство номер"
+msgstr "Број на уредот"
 
 msgctxt "#30006"
 msgid "Refresh Token"
-msgstr "Опресняване на токена"
+msgstr "Токен за освежување"
 
 msgctxt "#30007"
 msgid "Subscriber ID"
-msgstr "Абонат ID"
+msgstr "ID на претплатникот"
 
 msgctxt "#30008"
 msgid "Stream Key"
-msgstr "Ключ за поток"
+msgstr "Клуч за пренос"
 
 msgctxt "#30009"
 msgid "Stream User"
-msgstr "Потребител на потока"
+msgstr "Корисник за пренос"
 
 msgctxt "#30010"
 msgid "PVR client menu hook item (settings) called."
-msgstr "Извикан елемент от менюто на PVR клиента (настройки)."
+msgstr "Повикана е ставка од менито на PVR клиентот (поставки)."
 
 msgctxt "#30011"
 msgid "PVR client menu hook item (all items) called"
-msgstr "Извикан елемент от менюто на PVR клиента (всички елементи)"
+msgstr "Повикана е ставка од менито на PVR клиентот (сите ставки)"
 
 msgctxt "#30012"
 msgid "PVR client menu hook item (channels) called"
-msgstr "Извикан елемент от менюто на PVR клиента (канали)"
+msgstr "Повикана е ставка од менито на PVR клиентот (канали)"
 
 msgctxt "#30014"
 msgid "Credentials"
-msgstr "Удостоверяване"
+msgstr "Акредитиви"
 
 msgctxt "#30015"
 msgid "eon.tv"
-msgstr "EON.TV"
+msgstr "eon.tv"
 
 msgctxt "#30020"
 msgid "Hide not subscribed channels"
-msgstr "Скриване на канали с абонамент"
+msgstr "Сокриј ги каналите без претплата"
 
 msgctxt "#30021"
 msgid "Hide geoblocked channels"
-msgstr "Скриване на канали блокирани според държавата"
+msgstr "Сокриј ги гео-блокираните канали"
 
 msgctxt "#30022"
 msgid "Enable TV"
-msgstr "Активирайте Телевизия"
+msgstr "Овозможи ТВ"
 
 msgctxt "#30023"
 msgid "Enable radio"
-msgstr "Активирайте Радио"
+msgstr "Овозможи радио"
 
 msgctxt "#30024"
 msgid "Use categories"
-msgstr "Използвайте Категории"
+msgstr "Користи категории"
 
 msgctxt "#30025"
 msgid "Channels & groups"
-msgstr "Канали и Групи"
+msgstr "Канали и групи"
 
 msgctxt "#30026"
 msgid "Channels"
@@ -108,35 +108,35 @@ msgstr "Канали"
 
 msgctxt "#30027"
 msgid "Self Service Portal"
-msgstr "Портал за самообслужване"
+msgstr "Портал за самоуслуга"
 
 msgctxt "#30028"
 msgid "Self Service Access Token"
-msgstr "Токен за достъп за самообслужване"
+msgstr "Токен за пристап за самоуслуга"
 
 msgctxt "#30029"
 msgid "Self Service Refresh Token"
-msgstr "Токен за опресняване на самообслужване"
+msgstr "Токен за освежување за самоуслуга"
 
 msgctxt "#30030"
 msgid "Self Service Identity"
-msgstr "Идентичност за самообслужване"
+msgstr "Идентитет за самоуслуга"
 
 msgctxt "#30031"
 msgid "Device Serial"
-msgstr "Сериен номер на устройството"
+msgstr "Сериски број на уредот"
 
 msgctxt "#30032"
 msgid "Generic Access Token"
-msgstr "Общ токен за достъп"
+msgstr "Општ токен за пристап"
 
 msgctxt "#30033"
 msgid "First channel number"
-msgstr "Номер на първия канал"
+msgstr "Број на првиот канал"
 
 msgctxt "#30034"
 msgid "Service Provider"
-msgstr "Доставчик на услугата"
+msgstr "Давател на услугата"
 
 msgctxt "#30035"
 msgid "SBB"
@@ -156,7 +156,7 @@ msgstr "Telemach SI"
 
 msgctxt "#30039"
 msgid "Vivacom"
-msgstr "Виваком България"
+msgstr "Vivacom"
 
 msgctxt "#30040"
 msgid "Nova"
@@ -168,11 +168,11 @@ msgstr "Платформа"
 
 msgctxt "#30042"
 msgid "Web"
-msgstr "WEB версия (Не поддържа 4К канали)"
+msgstr "Веб"
 
 msgctxt "#30043"
 msgid "Android TV"
-msgstr "Android TV (4К канали, лимит до ЕДНО устройство)"
+msgstr "Android TV"
 
 msgctxt "#30044"
 msgid "WebOS"
@@ -180,31 +180,31 @@ msgstr "WebOS"
 
 msgctxt "#30045"
 msgid "Use short channel names"
-msgstr "Използване на къси имена за каналите"
+msgstr "Користи кратки имиња на канали"
 
 msgctxt "#30046"
 msgid "Please enter OTP to register device"
-msgstr "6 цифрен код за активиране на Android TV"
+msgstr "Внесете еднократна лозинка за да го регистрирате уредот"
 
 msgctxt "#30047"
 msgid "Please go to your service provider's self service portal, click the devices tab and enter the above 6-digit code. Click OK when finished. You have "
-msgstr "Моля влезте във вашия профил в сайта на Виваком и отидете в Настройки -> Телевизия -> Управление на Smart TV устройства и въведете 6 цифрения код за активация. Има лимит до ЕДНО устройство за активация! Вие имате "
+msgstr "Одете на порталот за самоуслуга на вашиот давател на услуги, кликнете на јазичето Уреди и внесете го горниот 6-цифрен код. Кликнете Во ред кога ќе завршите. Ви преостануваат "
 
 msgctxt "#30048"
 msgid "min left."
-msgstr " минути оставащо време."
+msgstr "мин."
 
 msgctxt "#30049"
 msgid "Streaming"
-msgstr "Поточно предаване"
+msgstr "Пренос"
 
 msgctxt "#30050"
 msgid "Inputstream"
-msgstr "Входящ поток"
+msgstr "Влезен пренос"
 
 msgctxt "#30051"
 msgid "Select Inputstream"
-msgstr "Изберете вида на входящия поток"
+msgstr "Изберете влезен пренос"
 
 msgctxt "#30052"
 msgid "inputstream.adaptive"
@@ -216,57 +216,57 @@ msgstr "inputstream.ffmpegdirect"
 
 msgctxt "#30054"
 msgid "Authentication error"
-msgstr "Грешка при удостоверяване"
+msgstr "Грешка при автентикација"
 
 msgctxt "#30055"
 msgid "Please enter or correct username and password in the settings"
-msgstr "Моля въведете правилно потребителско имe и парола в настройките"
+msgstr "Внесете или поправете го корисничкото име и лозинката во поставките"
 
 msgctxt "#30056"
 msgid "Age Rating"
-msgstr "Възрастово ограничение"
+msgstr "Возрасна оцена"
 
 msgctxt "#30057"
 msgid "Experimental native archive streaming"
-msgstr "Експериментално собствено архивно стриймване"
+msgstr "Експериментален изворен пренос на архива"
 
 msgctxt "#30058"
 msgid "ffmpegdirect Quality"
-msgstr "ffmpegdirect качество"
+msgstr "Квалитет на ffmpegdirect"
 
 msgctxt "#30059"
 msgid "Default"
-msgstr "По подразбиране"
+msgstr "Стандардно"
 
 msgctxt "#30060"
 msgid "Highest bitrate"
-msgstr "Най-висок битрейт"
+msgstr "Највисок битрејт"
 
 msgctxt "#30061"
 msgid "Lowest bitrate"
-msgstr "Най-нисък битрейт"
+msgstr "Најнизок битрејт"
 
 msgctxt "#30100"
 msgid "Use custom User-Agent"
-msgstr "Използване на потребителски User-Agent"
+msgstr "Користи сопствен User-Agent"
 
 msgctxt "#30101"
 msgid "Custom User-Agent"
-msgstr "Потребителски User-Agent"
+msgstr "Сопствен User-Agent"
 
 msgctxt "#30102"
 msgid "Device Registration (Optional)"
-msgstr "Регистрация на устройство (по избор)"
+msgstr "Регистрација на уредот (опционално)"
 
 
 msgctxt "#30500"
 msgid "Inputstream error"
-msgstr "Грешка при входящия поток"
+msgstr "Грешка во влезниот пренос"
 
 msgctxt "#30501"
 msgid "The %s addon is not installed."
-msgstr "%s приставка не е инсталирана."
+msgstr "Додатокот %s не е инсталиран."
 
 msgctxt "#30502"
 msgid "The %s addon is not enabled."
-msgstr "%s приставка не е включена."
+msgstr "Додатокот %s не е овозможен."
