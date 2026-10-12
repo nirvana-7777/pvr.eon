@@ -253,17 +253,21 @@ bool HttpClient::RefreshToken()
   refresh_token = Utils::JsonStringOrEmpty(doc, "refresh_token");
   std::string stream_key = Utils::JsonStringOrEmpty(doc, "stream_key");
   std::string stream_un = Utils::JsonStringOrEmpty(doc, "stream_un");
+  // NEW: the login/token exchange is the only place that hands us the
+  // deviceNumber the CDN expects as device= in the /stream URL. Persist it.
+  std::string device_number = Utils::JsonStringOrEmpty(doc, "device_number");
 
   if (doc.GetParseError() || statusCode != 200 || access_token.empty())
   {
     kodi::Log(ADDON_LOG_ERROR,
-              "Failed to refresh token. flow=%s status=%i access=%s refresh=%s streamKey=%s streamUser=%s responseLen=%zu preview=%s",
+              "Failed to refresh token. flow=%s status=%i access=%s refresh=%s streamKey=%s streamUser=%s deviceNumber=%s responseLen=%zu preview=%s",
               grant_flow.c_str(),
               statusCode,
               DescribeSecret(access_token).c_str(),
               DescribeSecret(refresh_token).c_str(),
               DescribeSecret(stream_key).c_str(),
               DescribeSecret(stream_un).c_str(),
+              DescribeSecret(device_number).c_str(),
               content_auth.size(),
               PreviewForLog(content_auth).c_str());
     return false;
@@ -279,14 +283,19 @@ bool HttpClient::RefreshToken()
   if (!stream_un.empty()) {
     m_settings->SetSetting("streamuser", stream_un);
   }
+  // NEW: without this, device= in every CDN URL is empty and the edge 403s.
+  if (!device_number.empty()) {
+    m_settings->SetSetting("devicenumber", device_number);
+  }
 
   kodi::Log(ADDON_LOG_INFO,
-            "Main token refresh succeeded. flow=%s access=%s refresh=%s streamKey=%s streamUser=%s",
+            "Main token refresh succeeded. flow=%s access=%s refresh=%s streamKey=%s streamUser=%s deviceNumber=%s",
             grant_flow.c_str(),
             DescribeSecret(access_token).c_str(),
             DescribeSecret(refresh_token).c_str(),
             DescribeSecret(stream_key).c_str(),
-            DescribeSecret(stream_un).c_str());
+            DescribeSecret(stream_un).c_str(),
+            DescribeSecret(device_number).c_str());
 
   return true;
 }
@@ -382,6 +391,12 @@ std::string HttpClient::HttpPost(const std::string& url, const std::string& post
   return HttpRequest("POST", url, postData, statusCode);
 }
 
+// NEW: PATCH, used by the v2/devices endpoint.
+std::string HttpClient::HttpPatch(const std::string& url, const std::string& postData, int &statusCode)
+{
+  return HttpRequest("PATCH", url, postData, statusCode);
+}
+
 std::string HttpClient::HttpRequest(const std::string& action, const std::string& url, const std::string& postData, int &statusCode)
 {
   Curl curl;
@@ -389,6 +404,10 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
   std::string auth_mode;
 
   curl.AddHeader("User-Agent", EON_USER_AGENT);
+
+  // CHANGED: treat /v2/devices exactly like /v1/devices for auth selection.
+  const bool isDeviceEndpoint = url.find("/v2/devices") != std::string::npos ||
+                                url.find("/v1/devices") != std::string::npos;
 
   size_t found = url.find(m_supportApi);
   if (found != std::string::npos) {
@@ -402,7 +421,7 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
     if (auth_mode.empty())
       auth_mode = "ss-basic";
   } else {
-    if (url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos) {
+    if (url.find(BROKER_URL) != std::string::npos || isDeviceEndpoint) {
       access_token = m_settings->GetGenericAccessToken();
       auth_mode = access_token.empty() ? "generic-basic" : "generic-bearer";
     } else {
@@ -444,7 +463,8 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
         refresh_successful = false;
       }
     } else {
-      if (url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos) {
+      // CHANGED: v2/devices uses the generic broker token, same as v1.
+      if (url.find(BROKER_URL) != std::string::npos || isDeviceEndpoint) {
         refresh_successful = RefreshGenericToken();
         access_token = m_settings->GetGenericAccessToken();
         retry_auth_mode = "generic-bearer";
@@ -462,7 +482,8 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
                 retry_auth_mode.c_str(), statusCode, content.size());
     } else {
       std::string refresh_token = m_settings->GetEonRefreshToken();
-      if (!refresh_token.empty() && !(url.find(BROKER_URL) != std::string::npos || url.find("v1/devices") != std::string::npos)) {
+      // CHANGED: same isDeviceEndpoint guard as above.
+      if (!refresh_token.empty() && !(url.find(BROKER_URL) != std::string::npos || isDeviceEndpoint)) {
         // Try to get new token as last resort
         m_settings->SetSetting("refreshtoken", "");
         refresh_successful = RefreshToken();
@@ -498,6 +519,11 @@ std::string HttpClient::HttpRequestToCurl(Curl &curl, const std::string& action,
   if (action == "POST")
   {
     content = curl.Post(url, postData, statusCode);
+  }
+  // NEW: PATCH branch.
+  else if (action == "PATCH")
+  {
+    content = curl.Patch(url, postData, statusCode);
   }
   else if (action == "DELETE")
   {

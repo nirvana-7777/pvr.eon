@@ -48,6 +48,13 @@ std::string Curl::Post(const std::string& url, const std::string& postData, int 
   return Request("POST", url, postData, statusCode);
 }
 
+// NEW: PATCH support. Request() already forwards the verb via
+// ADDON_CURL_OPTION_PROTOCOL "customrequest", so this is all that was missing.
+std::string Curl::Patch(const std::string& url, const std::string& postData, int &statusCode)
+{
+  return Request("PATCH", url, postData, statusCode);
+}
+
 std::string Curl::Request(const std::string& action, const std::string& url, const std::string& postData,
     int &statusCode)
 {
@@ -90,7 +97,7 @@ std::string Curl::Request(const std::string& action, const std::string& url, con
     statusCode = -2;
     return "";
   }
-  
+
   std::string proto = file.GetPropertyValue(ADDON_FILE_PROPERTY_RESPONSE_PROTOCOL, "");
   std::string::size_type posResponseCode = proto.find(' ');
   if (posResponseCode != std::string::npos)

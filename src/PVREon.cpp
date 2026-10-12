@@ -519,16 +519,18 @@ bool CPVREon::GetDeviceData()
   return true;
 }
 
-bool CPVREon::GetDeviceFromSerial()
+std::string CPVREon::BuildV1DeviceBody() const
 {
+  // Exactly what GetDeviceFromSerial used to concatenate, preserved verbatim
+  // so the v1 providers see no change at all.
   std::string postData;
 
   postData = "{\"deviceName\":\"" + EonParameters[m_platform].device_name +
-                "\",\"deviceType\":\"" + EonParameters[m_platform].device_type +
-                "\",\"modelName\":\"" + EonParameters[m_platform].device_model +
-                "\",\"platform\":\"" + EonParameters[m_platform].device_platform +
-                "\",\"serial\":\"" + m_device_serial +
-                "\",\"clientSwVersion\":\"" + EonParameters[m_platform].client_sw_version;
+             "\",\"deviceType\":\"" + EonParameters[m_platform].device_type +
+             "\",\"modelName\":\"" + EonParameters[m_platform].device_model +
+             "\",\"platform\":\"" + EonParameters[m_platform].device_platform +
+             "\",\"serial\":\"" + m_device_serial +
+             "\",\"clientSwVersion\":\"" + EonParameters[m_platform].client_sw_version;
   if (m_platform == PLATFORM_ANDROIDTV)
     postData += "\",\"clientSwBuild\":\"" + EonParameters[m_platform].client_sw_build;
   postData += "\",\"systemSwVersion\":{\"name\":\"" + EonParameters[m_platform].system_sw +
@@ -537,18 +539,151 @@ bool CPVREon::GetDeviceFromSerial()
     postData += ",\"fcmToken\":\"\""; //TODO: implement parameter fcmToken...
   postData += "}";
 
-  std::string url = m_api + "v1/devices";
+  return postData;
+}
 
-  rapidjson::Document doc;
-  if (!GetPostJson(url, postData, doc)) {
-    kodi::Log(ADDON_LOG_ERROR, "Failed to get devices");
+std::string CPVREon::BuildV2DeviceBody(const std::string& deviceNumber) const
+{
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+
+  w.StartObject();
+  w.Key("deviceNumber");    w.String(deviceNumber.c_str());
+  w.Key("deviceName");      w.String(EonParameters[m_platform].device_name.c_str());
+  w.Key("modelName");       w.String(EonParameters[m_platform].device_model.c_str());
+  w.Key("clientSwVersion"); w.String(EonParameters[m_platform].client_sw_version.c_str());
+  if (m_platform == PLATFORM_ANDROIDTV)
+  {
+    w.Key("clientSwBuild"); w.String(EonParameters[m_platform].client_sw_build.c_str());
+  }
+  w.Key("systemSwVersion");
+  w.StartObject();
+    w.Key("systemName"); w.String(EonParameters[m_platform].system_sw.c_str());
+    w.Key("version");    w.String(EonParameters[m_platform].system_version.c_str());
+  w.EndObject();
+  w.EndObject();
+
+  return sb.GetString();
+}
+
+bool CPVREon::RegisterDevice(const std::string& v2Body,
+                             const std::string& v1Body,
+                             DeviceRegistration& out)
+{
+  out = {};
+
+  // ---- v2 first (PATCH): the current Vivacom contract ----
+  {
+    int status = 0;
+    const std::string result = m_httpClient->HttpPatch(m_api + "v2/devices", v2Body, status);
+    kodi::Log(ADDON_LOG_DEBUG, "v2/devices -> status=%i preview=%s",
+              status, PreviewForLog(result).c_str());
+
+    if (status == 200 || status == 206)
+    {
+      rapidjson::Document doc;
+      doc.Parse(result.c_str());
+      if (!doc.GetParseError() && doc.IsObject())
+      {
+        out.deviceId     = std::to_string(Utils::JsonIntOrZero(doc, "deviceId"));
+        out.deviceNumber = Utils::JsonStringOrEmpty(doc, "deviceNumber");
+        if (!out.deviceId.empty() && !out.deviceNumber.empty())
+        {
+          kodi::Log(ADDON_LOG_INFO, "Device registration via v2 (PATCH). id=%s number=%s",
+                    out.deviceId.c_str(), out.deviceNumber.c_str());
+          return true;
+        }
+      }
+      kodi::Log(ADDON_LOG_ERROR, "v2/devices returned 2xx without usable device fields.");
+      return false;
+    }
+
+    // Only "endpoint not present" justifies the v1 fallback. A 400/401/403
+    // means v2 answered and rejected us -- retrying v1 would hide that.
+    if (status != 404 && status != 405 && status != 501)
+    {
+      kodi::Log(ADDON_LOG_ERROR,
+                "v2/devices rejected the request (status=%i); not falling back to v1.",
+                status);
+      return false;
+    }
+
+    kodi::Log(ADDON_LOG_INFO, "v2/devices unavailable here (status=%i); trying v1.", status);
+  }
+
+  // ---- v1 fallback (POST): the ex-Yu providers ----
+  {
+    int status = 0;
+    const std::string result = m_httpClient->HttpPost(m_api + "v1/devices", v1Body, status);
+    kodi::Log(ADDON_LOG_DEBUG, "v1/devices -> status=%i preview=%s",
+              status, PreviewForLog(result).c_str());
+
+    if (status != 200 && status != 206)
+    {
+      kodi::Log(ADDON_LOG_ERROR, "v1/devices failed (status=%i).", status);
+      return false;
+    }
+
+    rapidjson::Document doc;
+    doc.Parse(result.c_str());
+    if (doc.GetParseError() || !doc.IsObject())
+    {
+      kodi::Log(ADDON_LOG_ERROR, "v1/devices returned unparsable JSON.");
+      return false;
+    }
+
+    out.deviceId     = std::to_string(Utils::JsonIntOrZero(doc, "deviceId"));
+    out.deviceNumber = Utils::JsonStringOrEmpty(doc, "deviceNumber");
+    if (out.deviceId.empty() || out.deviceNumber.empty())
+    {
+      kodi::Log(ADDON_LOG_ERROR,
+                "v1/devices returned no usable device fields (id=%s number=%s).",
+                out.deviceId.c_str(), out.deviceNumber.c_str());
+      return false;
+    }
+
+    kodi::Log(ADDON_LOG_INFO, "Device registration via v1 (POST). id=%s number=%s",
+              out.deviceId.c_str(), out.deviceNumber.c_str());
+    return true;
+  }
+}
+
+bool CPVREon::GetDeviceFromSerial()
+{
+  // deviceNumber is issued by the login/token exchange and persisted there
+  // (see HttpClient::RefreshToken). Never invent one here: a made-up UUID
+  // registers a *different* device and the CDN will not recognise it.
+  if (m_device_number.empty())
+  {
+    kodi::Log(ADDON_LOG_ERROR,
+              "deviceNumber is empty; refusing to register a synthetic device. "
+              "The login token response's 'device_number' must be stored first.");
     return false;
   }
 
-  m_device_id = std::to_string(Utils::JsonIntOrZero(doc, "deviceId"));
-  m_device_number = Utils::JsonStringOrEmpty(doc, "deviceNumber");
-  kodi::Log(ADDON_LOG_DEBUG, "Got Device ID: %s and Device Number: %s", m_device_id.c_str(), m_device_number.c_str());
+  if (m_device_serial.empty())
+  {
+    m_device_serial = m_httpClient->GetUUID();
+    m_settings->SetSetting("deviceserial", m_device_serial);
+    kodi::Log(ADDON_LOG_DEBUG, "Generated device serial: %s", m_device_serial.c_str());
+  }
 
+  const std::string v2Body = BuildV2DeviceBody(m_device_number);
+  const std::string v1Body = BuildV1DeviceBody();
+
+  DeviceRegistration reg;
+  if (!RegisterDevice(v2Body, v1Body, reg))
+    return false;
+
+  m_device_id     = reg.deviceId;
+  m_device_number = reg.deviceNumber;
+
+  m_settings->SetSetting("deviceid", m_device_id);
+  m_settings->SetSetting("devicenumber", m_device_number);
+
+  kodi::Log(ADDON_LOG_INFO, "Device registration stored. deviceId=%s deviceNumber=%s",
+            DescribeValue(m_device_id).c_str(),
+            DescribeValue(m_device_number).c_str());
   return true;
 }
 
@@ -834,6 +969,40 @@ CPVREon::CPVREon() :
             DescribeValue(m_device_id).c_str(),
             DescribeValue(m_device_number).c_str(),
             DescribeValue(m_device_serial).c_str());
+
+  // NEW: login is lazy -- the only caller of RefreshToken() is the 401 path
+  // in HttpClient::HttpRequest(). On a cold start that means GetDeviceFromSerial()
+  // below triggers login, but by then the /devices body has already been built
+  // with an empty deviceNumber. Prime the token first so device_number is
+  // populated (RefreshToken stores it) before we build the body.
+  if (m_settings->GetEonAccessToken().empty() ||
+      m_settings->GetEonDeviceNumber().empty())
+  {
+    const bool haveRefresh = !m_settings->GetEonRefreshToken().empty();
+    const bool haveCreds   = !m_settings->GetEonUsername().empty() &&
+                             !m_settings->GetEonPassword().empty();
+    if (haveRefresh || haveCreds)
+    {
+      kodi::Log(ADDON_LOG_INFO,
+                "Priming token before device registration. refresh=%s creds=%s",
+                BoolState(haveRefresh), BoolState(haveCreds));
+      if (m_httpClient->RefreshToken())
+      {
+        m_device_number = m_settings->GetEonDeviceNumber();
+        m_device_id     = m_settings->GetEonDeviceID();
+        kodi::Log(ADDON_LOG_INFO,
+                  "Token primed. deviceId=%s deviceNumber=%s",
+                  DescribeValue(m_device_id).c_str(),
+                  DescribeValue(m_device_number).c_str());
+      }
+      else
+      {
+        kodi::Log(ADDON_LOG_ERROR,
+                  "Token priming failed; device registration will likely fail.");
+      }
+    }
+  }
+
 /*
   m_ss_identity = m_settings->GetSSIdentity();
   if (m_ss_identity.empty()) {
