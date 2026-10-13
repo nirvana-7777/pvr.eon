@@ -339,4 +339,17 @@ private:
   bool RefreshDeviceRegistration();
   int GetDefaultNumber(const bool isRadio, int id);
   bool HandleSession(bool start, int cid, int epg_id);
+
+  // NEW: v2-first / v1-fallback device registration.
+  struct DeviceRegistration
+  {
+    std::string deviceId;
+    std::string deviceNumber;
+  };
+
+  bool RegisterDevice(const std::string& v2Body,
+                      const std::string& v1Body,
+                      DeviceRegistration& out);
+  std::string BuildV1DeviceBody() const;
+  std::string BuildV2DeviceBody(const std::string& deviceNumber) const;
 };
