@@ -573,6 +573,12 @@ bool CPVREon::RegisterDevice(const std::string& v2Body,
   out = {};
 
   // ---- v2 first (PATCH): the current Vivacom contract ----
+  //
+  // Skipped entirely when v2Body is empty. That happens on first run for
+  // providers whose login exchange doesn't mint a deviceNumber (the ex-Yu
+  // brands): sending v2/devices with a blank deviceNumber would either be
+  // rejected or register a phantom device, so let v1 mint one below.
+  if (!v2Body.empty())
   {
     int status = 0;
     const std::string result = m_httpClient->HttpPatch(m_api + "v2/devices", v2Body, status);
@@ -610,8 +616,13 @@ bool CPVREon::RegisterDevice(const std::string& v2Body,
 
     kodi::Log(ADDON_LOG_INFO, "v2/devices unavailable here (status=%i); trying v1.", status);
   }
+  else
+  {
+    kodi::Log(ADDON_LOG_INFO,
+              "Skipping v2/devices (no deviceNumber yet); using v1 to mint one.");
+  }
 
-  // ---- v1 fallback (POST): the ex-Yu providers ----
+  // ---- v1 fallback (POST): mints deviceNumber where the login didn't ----
   {
     int status = 0;
     const std::string result = m_httpClient->HttpPost(m_api + "v1/devices", v1Body, status);
@@ -650,17 +661,6 @@ bool CPVREon::RegisterDevice(const std::string& v2Body,
 
 bool CPVREon::GetDeviceFromSerial()
 {
-  // deviceNumber is issued by the login/token exchange and persisted there
-  // (see HttpClient::RefreshToken). Never invent one here: a made-up UUID
-  // registers a *different* device and the CDN will not recognise it.
-  if (m_device_number.empty())
-  {
-    kodi::Log(ADDON_LOG_ERROR,
-              "deviceNumber is empty; refusing to register a synthetic device. "
-              "The login token response's 'device_number' must be stored first.");
-    return false;
-  }
-
   if (m_device_serial.empty())
   {
     m_device_serial = m_httpClient->GetUUID();
@@ -668,7 +668,12 @@ bool CPVREon::GetDeviceFromSerial()
     kodi::Log(ADDON_LOG_DEBUG, "Generated device serial: %s", m_device_serial.c_str());
   }
 
-  const std::string v2Body = BuildV2DeviceBody(m_device_number);
+  // deviceNumber may be legitimately empty on first run for providers whose
+  // login exchange doesn't hand one out (the ex-Yu brands on v1); the v2
+  // branch simply cannot be attempted in that case, but the v1 fallback
+  // still must run. It must NOT be a global precondition.
+  const std::string v2Body =
+      m_device_number.empty() ? "" : BuildV2DeviceBody(m_device_number);
   const std::string v1Body = BuildV1DeviceBody();
 
   DeviceRegistration reg;
