@@ -1,0 +1,79 @@
+name: Build osx-arm64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    env:
+      PVR_EON_ID: pvr.eon
+      XBMC_REF: Omega
+      BUILD_TYPE: Release
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+    steps:
+      - name: Checkout addon
+        uses: actions/checkout@v4
+        with:
+          path: pvr.eon
+
+      - name: Checkout xbmc
+        uses: actions/checkout@v4
+        with:
+          repository: xbmc/xbmc
+          ref: ${{ env.XBMC_REF }}
+          path: xbmc
+
+      - name: Install build dependencies
+        run: |
+          brew install autoconf automake libtool pkg-config gnu-sed flex bison gperf meson ninja
+
+      - name: Bootstrap and configure Kodi depends
+        run: |
+          work=$GITHUB_WORKSPACE
+          cd "$work/xbmc/tools/depends"
+          ./bootstrap
+          ./configure \
+            --host=aarch64-apple-darwin \
+            --with-platform=macos \
+            --with-tarballs="$work/tarballs" \
+            --enable-debug=no \
+            --prefix="$work/kodi-depends"
+
+      - name: Prepare addon definition and toolchain
+        run: |
+          work=$GITHUB_WORKSPACE
+          mkdir -p "$work/definition/$PVR_EON_ID" "$work/addon-depends/share" "$work/out/zips" "$work/out/install"
+          printf '%s . .\n' "$PVR_EON_ID" > "$work/definition/$PVR_EON_ID/$PVR_EON_ID.txt"
+          printf 'osx\n' > "$work/definition/$PVR_EON_ID/platforms.txt"
+          tmpl="$work/xbmc/tools/depends/target/Toolchain_binaddons.cmake"
+          test -f "$tmpl"
+          sed "s|@CMAKE_FIND_ROOT_PATH@|$work/addon-depends|g" "$tmpl" \
+            > "$work/addon-depends/share/Toolchain_binaddons.cmake"
+
+      - name: Configure and build addon
+        run: |
+          work=$GITHUB_WORKSPACE
+          cmake \
+            -S "$work/xbmc/cmake/addons" \
+            -B "$work/build" \
+            -DADDONS_TO_BUILD="$PVR_EON_ID" \
+            -DADDONS_DEFINITION_DIR="$work/definition" \
+            -DADDON_SRC_PREFIX="$work" \
+            -DADDON_DEPENDS_PATH="$work/addon-depends" \
+            -DCORE_SOURCE_DIR="$work/xbmc" \
+            -DCMAKE_TOOLCHAIN_FILE="$work/addon-depends/share/Toolchain_binaddons.cmake" \
+            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_INSTALL_PREFIX="$work/out/install" \
+            -DPACKAGE_DIR="$work/out/zips" \
+            -DPACKAGE_ZIP=1
+          cmake --build "$work/build" --target "$PVR_EON_ID" --parallel 3
+          cmake --build "$work/build" --target "package-$PVR_EON_ID" --parallel 3
+
+      - name: Upload zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: pvr.eon-osx-arm64
+          path: out/zips/**/*.zip
+          if-no-files-found: error
+          

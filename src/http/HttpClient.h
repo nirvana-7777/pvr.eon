@@ -25,6 +25,10 @@ public:
   void SetApi(const std::string& api);
   void SetSupportApi(const std::string& supportApi);
   std::string GetUUID();
+  // NEW: false while the most recent main-token refresh attempt failed.
+  // Lets callers avoid destructive recovery (device re-registration) when
+  // the real problem is that the account cannot obtain tokens at all.
+  bool IsMainTokenHealthy() const { return m_mainTokenHealthy; }
   void SetStatusCodeHandler(HttpStatusCodeHandler* statusCodeHandler) {
     m_statusCodeHandler = statusCodeHandler;
   }
@@ -41,6 +45,7 @@ private:
   std::string client_secret;
   */
   CSettings* m_settings;
+  bool m_mainTokenHealthy = true;
   HttpStatusCodeHandler *m_statusCodeHandler = nullptr;
 };
 

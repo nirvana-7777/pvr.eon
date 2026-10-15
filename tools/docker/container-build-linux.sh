@@ -67,4 +67,5 @@ cmake --build "${build_dir}" --target "${PVR_EON_ID}" --parallel "$(nproc)"
 cmake --build "${build_dir}" --target "package-${PVR_EON_ID}" --parallel "$(nproc)"
 
 git -C "${xbmc_work}" rev-parse HEAD > "${output_root}/xbmc-commit.txt"
-git -C "${addon_work}" rev-parse HEAD > "${output_root}/pvr-eon-commit.txt"
+# The addon tree may come from an archive without .git; skip the hash quietly.
+git -C "${addon_work}" rev-parse HEAD > "${output_root}/pvr-eon-commit.txt" 2>/dev/null || true

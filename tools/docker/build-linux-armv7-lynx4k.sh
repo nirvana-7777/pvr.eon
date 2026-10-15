@@ -5,7 +5,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 addon_root=$(cd "${script_dir}/../.." && pwd)
 workspace_root=$(cd "${addon_root}/.." && pwd)
 xbmc_root="${workspace_root}/xbmc"
-output_root="${addon_root}/build/Lynx4k"
+output_root="${addon_root}/build/docker-linux-armv7-lynx4k"
 image_tag="pvr-eon-builder:linux-armv7"
 
 if [[ ! -d "${xbmc_root}/.git" ]]; then

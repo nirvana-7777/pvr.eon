@@ -91,6 +91,12 @@ fi
 sed "s|@CMAKE_FIND_ROOT_PATH@|${addon_depends}|g" \
   "${toolchain_template}" > "${toolchain_file}"
 
+# CPack otherwise falls back to the host /usr/bin/strip, which cannot
+# handle Android binaries; point CMake at the NDK's llvm-strip instead.
+cat >> "${toolchain_file}" <<EOF
+set(CMAKE_STRIP "${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" CACHE FILEPATH "strip" FORCE)
+EOF
+
 cmake \
   -S "${xbmc_work}/cmake/addons" \
   -B "${build_dir}" \
@@ -110,7 +116,8 @@ cmake --build "${build_dir}" --target "${PVR_EON_ID}" --parallel "$(nproc)"
 cmake --build "${build_dir}" --target "package-${PVR_EON_ID}" --parallel "$(nproc)"
 
 git -C "${xbmc_work}" rev-parse HEAD > "${output_root}/xbmc-commit.txt"
-git -C "${addon_work}" rev-parse HEAD > "${output_root}/pvr-eon-commit.txt"
+# The addon tree may come from an archive without .git; skip the hash quietly.
+git -C "${addon_work}" rev-parse HEAD > "${output_root}/pvr-eon-commit.txt" 2>/dev/null || true
 cat > "${output_root}/android-build-info.txt" <<EOF
 build_type=${BUILD_TYPE}
 android_host=${ANDROID_HOST}
