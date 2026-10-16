@@ -694,19 +694,21 @@ bool CPVREon::GetDeviceFromSerial()
 
 bool CPVREon::RefreshDeviceRegistration()
 {
+  // NEW: re-registering only helps when the account can still obtain tokens
+  // (a stale device registration with a working login). When the token
+  // refresh itself is failing, wiping the stored session and registering a
+  // replacement device on every start makes things strictly worse: it
+  // destroys a restorable session and adds a device to the account's list
+  // each time. Bail out and leave everything as it is.
+  if (!m_httpClient->IsMainTokenHealthy())
+  {
+    kodi::Log(ADDON_LOG_ERROR,
+              "Not refreshing the device registration: the last token refresh failed, "
+              "so re-registering cannot help. Stored session left untouched.");
+    return false;
+  }
+
   kodi::Log(ADDON_LOG_INFO, "Refreshing stored device registration.");
-
-  m_settings->SetSetting("accesstoken", "");
-  m_settings->SetSetting("refreshtoken", "");
-  m_settings->SetSetting("subscriberid", "");
-  m_settings->SetSetting("streamkey", "");
-  m_settings->SetSetting("streamuser", "");
-  m_settings->SetSetting("deviceid", "");
-  m_settings->SetSetting("devicenumber", "");
-
-  m_device_id.clear();
-  m_device_number.clear();
-  m_subscriber_id.clear();
 
   m_device_serial = m_settings->GetEonDeviceSerial();
   if (m_device_serial.empty())
@@ -716,14 +718,32 @@ bool CPVREon::RefreshDeviceRegistration()
     kodi::Log(ADDON_LOG_DEBUG, "Generated replacement device serial: %s", m_device_serial.c_str());
   }
 
+  // NEW: register the replacement device BEFORE discarding anything.
+  // Clearing only the in-memory deviceNumber makes GetDeviceFromSerial take
+  // the v1 mint path; the stored session stays intact until the new
+  // registration has actually succeeded (GetDeviceFromSerial persists the
+  // new deviceid/devicenumber itself).
+  m_device_id.clear();
+  m_device_number.clear();
+
   if (!GetDeviceFromSerial())
   {
-    kodi::Log(ADDON_LOG_ERROR, "Failed to refresh stored device registration.");
+    kodi::Log(ADDON_LOG_ERROR,
+              "Failed to refresh stored device registration; keeping the previous session.");
+    m_device_id = m_settings->GetEonDeviceID();
+    m_device_number = m_settings->GetEonDeviceNumber();
     return false;
   }
 
-  m_settings->SetSetting("deviceid", m_device_id);
-  m_settings->SetSetting("devicenumber", m_device_number);
+  // Only now drop the session values bound to the old device, so the next
+  // 401 logs in fresh against the new deviceNumber.
+  m_settings->SetSetting("accesstoken", "");
+  m_settings->SetSetting("refreshtoken", "");
+  m_settings->SetSetting("subscriberid", "");
+  m_settings->SetSetting("streamkey", "");
+  m_settings->SetSetting("streamuser", "");
+  m_subscriber_id.clear();
+
   kodi::Log(ADDON_LOG_INFO, "Device registration refreshed. deviceId=%s deviceNumber=%s",
             DescribeValue(m_device_id).c_str(),
             DescribeValue(m_device_number).c_str());

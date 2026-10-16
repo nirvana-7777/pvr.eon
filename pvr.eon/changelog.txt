@@ -1,3 +1,27 @@
+v21.8.7
+  - Support EON's new v2/devices endpoint: Vivacom moved device registration
+    from POST v1/devices to PATCH v2/devices, which left the addon unable to
+    resolve streams (and EON VOD reporting "Decryption key missing").
+    Registration now tries v2 first and falls back to v1 where v2 is not
+    deployed, so both Vivacom (v2) and the ex-Yu providers (v1) work
+  - Fix login failing on fresh installations of v1 providers with
+    "invalid_device / Device not registered or locked": v2 registration
+    needs an existing deviceNumber, which a clean install does
+    not have yet. When no deviceNumber is known, v2 is skipped and v1 is
+    used to mint one, instead of refusing to register
+  - Persist the deviceNumber returned by the login/token exchange; it is
+    required for the v2 registration body and for the device= parameter in
+    stream URLs
+  - Log in eagerly at startup before device registration instead of only
+    after the first 401, so the registration request is built with a valid
+    deviceNumber
+  - Protect the stored session from failed-login loops: the saved refresh
+    token is now dropped only when the server definitively rejects it, not
+    on transient errors; device re-registration is skipped entirely while
+    token refresh is failing (it cannot help and used to wipe the session
+    and register a new device on every start); and re-registration replaces
+    the stored session only after the new device registration succeeded
+
 v21.8.6
   - Fix all radio channels except Stingray failing with a 403 error. minvbr
     and maxvbr are video bitrate bounds, but were being filled from the audio

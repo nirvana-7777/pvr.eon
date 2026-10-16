@@ -163,6 +163,10 @@ bool HttpClient::RefreshSSToken()
 
 bool HttpClient::RefreshToken()
 {
+  // Pessimistic until this attempt succeeds; every failure path below
+  // leaves it false so IsMainTokenHealthy() reflects the latest attempt.
+  m_mainTokenHealthy = false;
+
   Curl curl_auth;
 
   std::string url = m_api + "oauth/token?grant_type=";
@@ -270,6 +274,18 @@ bool HttpClient::RefreshToken()
               DescribeSecret(device_number).c_str(),
               content_auth.size(),
               PreviewForLog(content_auth).c_str());
+    // NEW: only a definitive rejection (4xx) of the refresh_token grant
+    // means the stored refresh token is dead -- drop it and fall back to a
+    // full login once. A network error or 5xx keeps the token untouched so
+    // a transient failure can no longer destroy a restorable session.
+    if (grant_flow == "refresh_token" && statusCode >= 400 && statusCode < 500)
+    {
+      kodi::Log(ADDON_LOG_INFO,
+                "Stored refresh token rejected by the server (status=%i); retrying with a fresh login.",
+                statusCode);
+      m_settings->SetSetting("refreshtoken", "");
+      return RefreshToken();
+    }
     return false;
   }
 
@@ -297,6 +313,7 @@ bool HttpClient::RefreshToken()
             DescribeSecret(stream_un).c_str(),
             DescribeSecret(device_number).c_str());
 
+  m_mainTokenHealthy = true;
   return true;
 }
 
@@ -484,8 +501,10 @@ std::string HttpClient::HttpRequest(const std::string& action, const std::string
       std::string refresh_token = m_settings->GetEonRefreshToken();
       // CHANGED: same isDeviceEndpoint guard as above.
       if (!refresh_token.empty() && !(url.find(BROKER_URL) != std::string::npos || isDeviceEndpoint)) {
-        // Try to get new token as last resort
-        m_settings->SetSetting("refreshtoken", "");
+        // Try to get a new token as last resort. NOTE: the stored refresh
+        // token is intentionally no longer cleared here. RefreshToken()
+        // itself drops it when the server definitively rejects it, so a
+        // transient failure cannot wipe a restorable session anymore.
         refresh_successful = RefreshToken();
         access_token = m_settings->GetEonAccessToken();
         if (!access_token.empty())
