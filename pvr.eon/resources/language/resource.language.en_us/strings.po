@@ -143,7 +143,7 @@ msgid "SBB"
 msgstr ""
 
 msgctxt "#30036"
-msgid "Telemach"
+msgid "Telemach BH"
 msgstr ""
 
 msgctxt "#30037"
@@ -160,6 +160,22 @@ msgstr ""
 
 msgctxt "#30040"
 msgid "Nova"
+msgstr ""
+
+msgctxt "#30062"
+msgid "Telemach ME"
+msgstr ""
+
+msgctxt "#30063"
+msgid "Diagnostics: log stream manifest (slower channel start)"
+msgstr ""
+
+msgctxt "#30064"
+msgid "Profile name"
+msgstr ""
+
+msgctxt "#30065"
+msgid "Live TV controls for programmes from the guide"
 msgstr ""
 
 msgctxt "#30041"

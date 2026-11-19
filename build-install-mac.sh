@@ -25,7 +25,11 @@ fi
 BINARY_ADDONS_TARGET_DIR="$1/tools/depends/target/binary-addons"
 MACOSX_BINARY_ADDONS_TARGET_DIR=""
 KODI_ADDONS_DIR="$HOME/Library/Application Support/Kodi/addons"
-ADDON_NAME=`basename -s .git \`git config --get remote.origin.url\``
+# The addon id is fixed; deriving it from the git remote broke on a source
+# tree unpacked from an archive (no .git), on a clone under another name, and
+# when the script was run from an unrelated directory -- and the name feeds a
+# plain rm -rf below, which is not the place for guesswork.
+ADDON_NAME="pvr.eon"
 
 if [ ! -d "$BINARY_ADDONS_TARGET_DIR" ]; then
   echo "Error: Could not find binary addons directory at: $BINARY_ADDONS_TARGET_DIR" >&2

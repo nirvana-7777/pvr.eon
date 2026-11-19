@@ -143,8 +143,8 @@ msgid "SBB"
 msgstr "SBB"
 
 msgctxt "#30036"
-msgid "Telemach"
-msgstr "Telemach"
+msgid "Telemach BH"
+msgstr "Telemach BH"
 
 msgctxt "#30037"
 msgid "Telemach HR"
@@ -161,6 +161,22 @@ msgstr "Vivacom"
 msgctxt "#30040"
 msgid "Nova"
 msgstr "Nova"
+
+msgctxt "#30062"
+msgid "Telemach ME"
+msgstr "Telemach ME"
+
+msgctxt "#30063"
+msgid "Diagnostics: log stream manifest (slower channel start)"
+msgstr "Διαγνωστικά: καταγραφή manifest ροής (πιο αργή εκκίνηση καναλιού)"
+
+msgctxt "#30064"
+msgid "Profile name"
+msgstr "Όνομα προφίλ"
+
+msgctxt "#30065"
+msgid "Live TV controls for programmes from the guide"
+msgstr "Χειριστήρια TV για εκπομπές από τον οδηγό"
 
 msgctxt "#30041"
 msgid "Platform"

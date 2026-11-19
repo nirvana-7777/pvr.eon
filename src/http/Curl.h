@@ -1,5 +1,6 @@
 #include <string>
 #include <map>
+#include <vector>
 
 class Curl
 {
@@ -19,6 +20,11 @@ public:
   std::string GetLocation() {
     return m_location;
   }
+  // Raw Set-Cookie header lines of the last response (attributes included),
+  // for callers that run their own cookie jar across redirect hops.
+  const std::vector<std::string>& GetSetCookieHeaders() const {
+    return m_setCookieHeaders;
+  }
 
 private:
   std::string Request(const std::string& action, const std::string& url,
@@ -29,4 +35,5 @@ private:
   std::map<std::string, std::string> m_options;
   std::map<std::string, std::string> m_cookies;
   std::string m_location;
+  std::vector<std::string> m_setCookieHeaders;
 };

@@ -1,3 +1,101 @@
+v21.8.12
+  - Fix the retried request after a token refresh being sent with only an
+    Authorization header: it dropped the User-Agent, the content type, and
+    the header that tells the EPG endpoint its time arguments are epoch
+    milliseconds. Most visibly, the first channel tuned after the stored
+    access token had expired lost its programme window and played as a plain
+    live stream with nothing to rewind into
+  - A programme played from the guide now shows its own length. It was being
+    presented with the timeline live TV gets -- from the programme's start
+    until now -- so a 30-minute episode that aired six hours ago read as six
+    hours with the progress bar barely off its left edge. A programme still
+    on air keeps growing as before, and playback still carries on past a
+    finished programme into whatever airs next
+  - Token refreshes are serialized across concurrent requests: when several
+    requests hit 401 at once, only the first refreshes the token and the
+    rest retry with the token it obtained, instead of each refresh
+    invalidating the previous one's result
+  - HTTP responses are read as bytes with a preallocated buffer instead of
+    being reassembled as C strings (one strlen() per 16KB chunk, truncating
+    at a stray NUL byte)
+  - The programme guide loads far faster. Kodi asks for the guide one channel
+    at a time and waits for each answer -- one HTTP round trip per channel.
+    The backend answers up to 15 channels per request, so a guide refresh now
+    starts a background prefetch that pulls the whole guide in batches across
+    four threads, ramping the batch size up so the first channels are not
+    kept waiting, and every channel is then answered from memory. Once Kodi
+    has been handed the full window, later refreshes carry only the last day
+    of the past plus the future (Kodi never drops a programme it was already
+    given), which is about 60% less for both sides to process
+  - Channel start no longer pays for diagnostics: the manifest fetch that
+    existed only to write log lines -- and consumed the opening playlist
+    window of the very session handed to the player -- now sits behind a new
+    setting, off by default (Streaming -> "Diagnostics: log stream manifest
+    (slower channel start)"; standard playback modes only). Radio keeps the
+    fetch regardless, because its streams are refused (HTTP 403) when Kodi's
+    audio player is the first to request them. The current time
+    embedded in stream and seek URLs is derived from the backend/device
+    clock offset, re-measured every 15 minutes, instead of being fetched for
+    every URL, and the "what is on now" lookup is remembered per channel
+    while that programme is still on air
+  - Reading an age rating no longer throws an exception per programme
+  - The changes in this version are based on fixes by davordragic
+
+v21.8.11
+  - Show the channel lists made on the account: the lists a viewer builds in
+    the EON apps were never read, so only the provider's own categories
+    appeared. Each list is now a channel group of its own, TV and radio
+    alike. The order its channels were put in is available as the
+    "Backend order" sort of Kodi's channel and guide windows. Groups
+    follow the arrangement stored on the account, the same as on other
+    devices; a list named like an existing group is left out. Changes made
+    on another device show up after the add-on restarts
+  - Add a "Profile name" setting: lists and their arrangement belong to a
+    viewer profile, and a login always lands on the account's default one.
+    With a profile's name entered, the session is moved onto that profile
+    the way the web player does it, and stays there across token refreshes.
+    Left empty, or if the name is not found, the default profile is used
+  - Add a "Live TV controls for programmes from the guide" setting for
+    inputstream.ffmpegdirect, off by default. Switched on, a programme from
+    the guide is opened as a channel again and keeps Kodi's live TV
+    controls; the price is the one v21.8.5 removed: while it plays,
+    selecting the channel's programme currently on air does nothing, so
+    getting back to live takes stopping playback first. Left off, nothing
+    changes: video controls, and the way back to live through the guide
+
+v21.8.10
+  - Various smaller fixes and internal improvements
+  - Windows support: the addon now builds for Windows as well. The seek
+    proxy's sockets go through winsock there, socket timeouts and the wake
+    mechanism use their Windows forms, timegm maps to _mkgmtime, and the AES
+    routine no longer relies on C variable-length arrays MSVC does not have
+  - macOS support: two builds are now provided, Apple Silicon (arm64) and
+    Intel (x86_64)
+
+v21.8.9
+  - Radio channels no longer advertise a replay archive: EON has none for
+    radio even though the API flags radio channels as if it did, so playing
+    a past radio programme from the guide failed with an error. Past radio
+    programmes are no longer offered for playback, and if cached guide data
+    still asks, the channel is played live instead
+  - Update the provider list to the broker's current brands: Telemach is now
+    Telemach BH, and Telemach ME (Crna Gora) was added. Stored provider
+    selections keep working: existing entries keep their stored values and
+    the new one is listed with the other Telemach brands
+  - Fix TV categories and their channels leaking into the Radio section: the
+    "All" group exists on both sides under the same name and was matched by
+    name alone. Groups are now matched by name and type, their members are
+    filtered by type, and a category with no channels of its own type on
+    this platform (e.g. a 4K category whose channels are only delivered to
+    other device types) is not shown at all. Based on a fix by pepo11
+
+v21.8.8
+  - Add Vivacom sign-in through Vivacom ID (login.vivacom.bg): Vivacom moved
+    its accounts to its own identity provider, so EON's password login could
+    only answer "Bad credentials" for them. The addon now signs in the way
+    the eontv.bg web app does (OAuth2 authorization code + PKCE) and renews
+    the session silently with the refresh token. Contributed by pepo11
+
 v21.8.7
   - Support EON's new v2/devices endpoint: Vivacom moved device registration
     from POST v1/devices to PATCH v2/devices, which left the addon unable to

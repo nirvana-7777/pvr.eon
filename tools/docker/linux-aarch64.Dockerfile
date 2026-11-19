@@ -21,6 +21,7 @@ RUN apt-get update \
     pkg-config \
     python3 \
     rapidjson-dev \
+    unzip \
     zip \
  && rm -rf /var/lib/apt/lists/*
 

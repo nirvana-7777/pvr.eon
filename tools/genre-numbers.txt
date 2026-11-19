@@ -1,0 +1,32 @@
+EPG genre numbers used by Kodi
+
+A PVR add-on tags a guide entry with a genre through
+kodi::addon::PVREPGTag::SetGenreType(). The value is a DVB content type
+(ETSI EN 300 468, content descriptor): the main genres are the multiples of
+16 listed below, and a finer sub-genre (0-15) can be passed separately
+through SetGenreSubType().
+
+  dec  hex    genre                                  constant
+  ---  -----  -------------------------------------  ----------------------------------------------
+    0  0x00   undefined                              EPG_EVENT_CONTENTMASK_UNDEFINED
+   16  0x10   Movie / Drama                          EPG_EVENT_CONTENTMASK_MOVIEDRAMA
+   32  0x20   News / Current affairs                 EPG_EVENT_CONTENTMASK_NEWSCURRENTAFFAIRS
+   48  0x30   Show / Game show                       EPG_EVENT_CONTENTMASK_SHOW
+   64  0x40   Sports                                 EPG_EVENT_CONTENTMASK_SPORTS
+   80  0x50   Children's / Youth programmes          EPG_EVENT_CONTENTMASK_CHILDRENYOUTH
+   96  0x60   Music / Ballet / Dance                 EPG_EVENT_CONTENTMASK_MUSICBALLETDANCE
+  112  0x70   Arts / Culture (without music)         EPG_EVENT_CONTENTMASK_ARTSCULTURE
+  128  0x80   Social / Political issues / Economics  EPG_EVENT_CONTENTMASK_SOCIALPOLITICALECONOMICS
+  144  0x90   Education / Science / Factual topics   EPG_EVENT_CONTENTMASK_EDUCATIONALSCIENCE
+  160  0xA0   Leisure hobbies                        EPG_EVENT_CONTENTMASK_LEISUREHOBBIES
+  176  0xB0   Special characteristics                EPG_EVENT_CONTENTMASK_SPECIAL
+  240  0xF0   user defined                           EPG_EVENT_CONTENTMASK_USERDEFINED
+  256  0x100  use the genre text from the backend    EPG_GENRE_USE_STRING
+
+192, 208 and 224 (0xC0-0xE0) have no meaning assigned. With 256, the text
+to show is supplied through SetGenreDescription().
+
+Source: xbmc/addons/kodi-dev-kit/include/kodi/c-api/addon-instance/pvr/pvr_epg.h
+
+This add-on does not set a genre on guide entries at present; the table is
+kept as a reference for when it does.

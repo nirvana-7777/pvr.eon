@@ -200,6 +200,22 @@ bool CSettings::Load()
     return false;
   }
 
+  // Optional: a settings file from before this setting existed simply has
+  // no profile chosen.
+  if (!kodi::addon::CheckSettingString("profile", m_eonProfileName))
+    m_eonProfileName.clear();
+  if (!kodi::addon::CheckSettingString("activeprofile", m_eonActiveProfile))
+    m_eonActiveProfile.clear();
+
+  if (!kodi::addon::CheckSettingBoolean("streamdiagnostics", m_logStreamDiagnostics))
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Couldn't get 'streamdiagnostics' setting");
+    return false;
+  }
+
+  if (!kodi::addon::CheckSettingBoolean("replayaschannel", m_replayAsChannel))
+    m_replayAsChannel = false;
+
   if (!kodi::addon::CheckSettingBoolean("usecustomuseragent", m_useCustomUserAgent))
   {
     /* If setting is unknown fallback to defaults */
@@ -228,6 +244,22 @@ ADDON_STATUS CSettings::SetSetting(const std::string& settingName,
     m_eonUsername = settingValue;
     if (tmp_sUsername != m_eonUsername)
       return ADDON_STATUS_NEED_RESTART;
+  }
+  else if (settingName == "profile")
+  {
+    kodi::Log(ADDON_LOG_DEBUG, "Changed Setting 'profile'");
+    const std::string previous = m_eonProfileName;
+    m_eonProfileName = settingValue;
+    if (previous != m_eonProfileName)
+      return ADDON_STATUS_NEED_RESTART;
+  }
+  else if (settingName == "activeprofile")
+  {
+    if (m_eonActiveProfile != settingValue)
+    {
+      m_eonActiveProfile = settingValue;
+      kodi::addon::SetSettingString("activeprofile", m_eonActiveProfile);
+    }
   }
   else if (settingName == "password")
   {
@@ -389,6 +421,11 @@ ADDON_STATUS CSettings::SetSetting(const std::string& settingName,
     m_experimentalNativeStream = settingValue == "true";
     if (previous != m_experimentalNativeStream)
       return ADDON_STATUS_NEED_RESTART;
+  }
+  else if (settingName == "replayaschannel")
+  {
+    kodi::Log(ADDON_LOG_DEBUG, "Changed Setting 'replayaschannel'");
+    m_replayAsChannel = settingValue == "true";
   }
   else if (settingName == "usecustomuseragent")
   {

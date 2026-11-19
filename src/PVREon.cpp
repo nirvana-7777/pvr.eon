@@ -11,9 +11,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <thread>
 
 #include <kodi/Filesystem.h>
@@ -45,7 +48,40 @@ constexpr int NATIVE_POLL_RETRY_COUNT = 10;
 // Depth of EON's rolling EPG archive; requests reaching further back are
 // rejected outright rather than truncated to what is available.
 constexpr time_t EPG_ARCHIVE_SECONDS = 7 * 24 * 60 * 60;
+// How long a measured backend/device clock offset is trusted before it is
+// measured again. Clock drift over this span is orders of magnitude below the
+// ~20s freshness the CDN requires of a ctime.
+constexpr int64_t SERVER_TIME_RESYNC_INTERVAL_MS = 15 * 60 * 1000;
+// Where the add-on records that it has handed Kodi the whole guide window.
+constexpr char EPG_DELIVERY_STATE_FILE[] = "epgdelivery.txt";
+constexpr int EPG_DELIVERY_STATE_VERSION = 1;
 constexpr auto NATIVE_POLL_RETRY_DELAY = std::chrono::milliseconds(200);
+
+// v1/time is answered in milliseconds since the epoch, so the device clock has
+// to be read at the same resolution to compare the two (see CPVREon::GetTime).
+int64_t DeviceTimeMs()
+{
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
+// The guide carries the age rating as a string, and most programmes leave it
+// empty or non-numeric. std::stoi signals that by throwing, which costs far
+// more than the parse itself when it happens tens of thousands of times in one
+// guide refresh -- so read it without exceptions.
+int AgeRatingOrZero(const std::string& value)
+{
+  if (value.empty())
+    return 0;
+
+  char* end = nullptr;
+  const long rating = std::strtol(value.c_str(), &end, 10);
+  if (end == value.c_str() || rating <= 0 || rating > std::numeric_limits<int>::max())
+    return 0;
+
+  return static_cast<int>(rating);
+}
 
 int64_t MonotonicNowMs()
 {
@@ -174,8 +210,8 @@ std::string ExpectedBrandIdentifier(int providerSetting)
   {
     case 0: // SBB
       return "sbb-qa";
-    case 1: // Telemach
-      return "telemach";
+    case 1: // Telemach BH (the broker renamed the plain "telemach" brand)
+      return "telemach-ba";
     case 2: // Telemach HR
       return "telemach-hr";
     case 3: // Telemach SI
@@ -184,9 +220,181 @@ std::string ExpectedBrandIdentifier(int providerSetting)
       return "vivacom";
     case 5: // Nova
       return "nova";
+    case 6: // Telemach ME (appended last so stored settings keep their meaning)
+      return "telemach-me";
     default:
       return "";
   }
+}
+
+// One slot of the arrangement the viewer gave their channel groups.
+struct GroupOrderEntry
+{
+  bool isCustom;
+  int id;
+};
+
+// Adds the viewer's own channel lists to the provider's categories. A list
+// keeps the channel order it was built in: its entries carry no position of
+// their own, so they are numbered by where they stand.
+size_t AppendCustomChannelLists(const rapidjson::Value& lists,
+                                bool tvEnabled,
+                                bool radioEnabled,
+                                std::vector<EonCategory>& categories,
+                                size_t& skipped)
+{
+  size_t added = 0;
+  skipped = 0;
+  if (!lists.IsArray())
+    return added;
+
+  for (rapidjson::Value::ConstValueIterator itr = lists.Begin(); itr != lists.End(); ++itr)
+  {
+    const rapidjson::Value& listItem = (*itr);
+    if (!listItem.IsObject())
+      continue;
+
+    const std::string type = Utils::JsonStringOrEmpty(listItem, "type");
+    bool isRadio = false;
+    if (type == "CUSTOM_RADIO")
+      isRadio = true;
+    else if (type != "CUSTOM_TV")
+      continue;
+    if (isRadio ? !radioEnabled : !tvEnabled)
+      continue;
+
+    EonCategory list;
+    list.name = Utils::JsonStringOrEmpty(listItem, "name");
+    list.id = Utils::JsonIntOrZero(listItem, "id");
+    list.order = 0;
+    list.isRadio = isRadio;
+    list.isDefault = false;
+    list.isCustom = true;
+    list.isPrimary = Utils::JsonBoolOrFalse(listItem, "primaryList");
+
+    if (list.name.empty())
+    {
+      ++skipped;
+      continue;
+    }
+
+    // Kodi tells groups of one kind apart by name alone, and so does
+    // GetChannelGroupMembers(): a second group under a name already in use
+    // would be handed the first one's channels.
+    const bool nameTaken =
+        std::any_of(categories.begin(), categories.end(), [&list](const EonCategory& existing) {
+          return existing.isRadio == list.isRadio && existing.name == list.name;
+        });
+    if (nameTaken)
+    {
+      kodi::Log(ADDON_LOG_INFO,
+                "Custom %s list '%s' skipped: a channel group of that name already exists.",
+                isRadio ? "radio" : "tv", list.name.c_str());
+      ++skipped;
+      continue;
+    }
+
+    if (listItem.HasMember("channels") && listItem["channels"].IsArray())
+    {
+      const rapidjson::Value& channels = listItem["channels"];
+      int position = 0;
+      for (rapidjson::Value::ConstValueIterator itr2 = channels.Begin(); itr2 != channels.End();
+           ++itr2)
+      {
+        if (!itr2->IsObject())
+          continue;
+        const int channelId = Utils::JsonIntOrZero(*itr2, "id");
+        if (channelId == 0)
+          continue;
+
+        EonCategoryChannel member;
+        member.id = channelId;
+        member.position = ++position;
+        list.channels.emplace_back(member);
+      }
+    }
+
+    categories.emplace_back(std::move(list));
+    ++added;
+  }
+
+  return added;
+}
+
+// Reads the arrangement stored under one preference key: the viewer's own
+// lists and the provider's categories, interleaved in the order chosen on
+// the account. Empty when the account has none stored.
+std::vector<GroupOrderEntry> ParseGroupOrder(const rapidjson::Value& preferences, const char* key)
+{
+  std::vector<GroupOrderEntry> order;
+  if (!preferences.IsArray())
+    return order;
+
+  for (rapidjson::Value::ConstValueIterator itr = preferences.Begin(); itr != preferences.End();
+       ++itr)
+  {
+    const rapidjson::Value& preference = (*itr);
+    if (!preference.IsObject() || Utils::JsonStringOrEmpty(preference, "preferenceKey") != key)
+      continue;
+
+    if (!preference.HasMember("preferenceValue") || !preference["preferenceValue"].IsArray())
+      break;
+
+    const rapidjson::Value& slots = preference["preferenceValue"];
+    for (rapidjson::Value::ConstValueIterator itr2 = slots.Begin(); itr2 != slots.End(); ++itr2)
+    {
+      if (!itr2->IsObject())
+        continue;
+      const std::string type = Utils::JsonStringOrEmpty(*itr2, "type");
+      const int id = Utils::JsonIntOrZero(*itr2, "id");
+      if (type == "CATEGORY")
+        order.push_back({false, id});
+      else if (type == "CUSTOM_TV" || type == "CUSTOM_RADIO")
+        order.push_back({true, id});
+    }
+    break;
+  }
+
+  return order;
+}
+
+// Puts the groups in the order they have on the account and numbers them
+// accordingly. Groups the stored arrangement does not mention (or all of
+// them, when nothing is stored) follow: the viewer's own lists first, the
+// main one leading, then the provider's categories in the provider's order.
+void ApplyGroupOrder(std::vector<EonCategory>& categories,
+                     const std::vector<GroupOrderEntry>& tvOrder,
+                     const std::vector<GroupOrderEntry>& radioOrder)
+{
+  const auto rank = [&tvOrder, &radioOrder](const EonCategory& category) {
+    const std::vector<GroupOrderEntry>& preferred = category.isRadio ? radioOrder : tvOrder;
+    for (size_t i = 0; i < preferred.size(); ++i)
+    {
+      if (preferred[i].isCustom == category.isCustom && preferred[i].id == category.id)
+        return i;
+    }
+    return preferred.size();
+  };
+
+  std::stable_sort(categories.begin(), categories.end(),
+                   [&rank](const EonCategory& a, const EonCategory& b) {
+                     if (a.isRadio != b.isRadio)
+                       return !a.isRadio;
+                     const size_t rankA = rank(a);
+                     const size_t rankB = rank(b);
+                     if (rankA != rankB)
+                       return rankA < rankB;
+                     if (a.isCustom != b.isCustom)
+                       return a.isCustom;
+                     if (a.isCustom)
+                       return a.isPrimary && !b.isPrimary;
+                     return a.order < b.order;
+                   });
+
+  int tvPosition = 0;
+  int radioPosition = 0;
+  for (EonCategory& category : categories)
+    category.order = category.isRadio ? ++radioPosition : ++tvPosition;
 }
 
 } // namespace
@@ -245,8 +453,6 @@ std::string string_to_hex(const std::string& input)
 
 std::string aes_encrypt_cbc(const std::string &iv_str, const std::string &key, const std::string &plaintext)
 {
-    uint8_t i;
-
     int dlen = strlen(plaintext.c_str());
     int klen = strlen(key.c_str());
 
@@ -256,15 +462,12 @@ std::string aes_encrypt_cbc(const std::string &iv_str, const std::string &key, c
     dlenu += block_size - (dlen % block_size);
     kodi::Log(ADDON_LOG_DEBUG, "The original length of the plaintext is = %d and the length of the padded plaintext is = %d", dlen, dlenu);
 
-    // Make the uint8_t arrays
-    uint8_t hexarray[dlenu];
-    uint8_t kexarray[klen];
-    uint8_t iv[klen];
-
-    // Initialize them with zeros
-    memset( hexarray, 0, dlenu );
-    memset( kexarray, 0, klen );
-    memset( iv, 0, klen );
+    // Heap buffers rather than C variable-length arrays: VLAs are a GNU
+    // extension MSVC does not have, and these vectors serve every compiler
+    // the same (zero-initialised by construction).
+    std::vector<uint8_t> hexarray(dlenu, 0);
+    std::vector<uint8_t> kexarray(klen, 0);
+    std::vector<uint8_t> iv(klen, 0);
 
     // Fill the uint8_t arrays
     for (int i=0;i<dlen;i++) {
@@ -275,16 +478,16 @@ std::string aes_encrypt_cbc(const std::string &iv_str, const std::string &key, c
         iv[i] = (uint8_t)iv_str[i];
     }
 
-    pkcs7_padding_pad_buffer( hexarray, dlen, sizeof(hexarray), block_size );
+    pkcs7_padding_pad_buffer( hexarray.data(), dlen, hexarray.size(), block_size );
 
     //start the encryption
     struct AES_ctx ctx;
-    AES_init_ctx_iv(&ctx, kexarray, iv);
+    AES_init_ctx_iv(&ctx, kexarray.data(), iv.data());
 
     // encrypt
-    AES_CBC_encrypt_buffer(&ctx, hexarray, dlenu);
+    AES_CBC_encrypt_buffer(&ctx, hexarray.data(), dlenu);
 
-    return std::string(reinterpret_cast<const char*>(hexarray), dlenu);
+    return std::string(reinterpret_cast<const char*>(hexarray.data()), dlenu);
 }
 
 bool CPVREon::GetPostJson(const std::string& url, const std::string& body, rapidjson::Document& doc,
@@ -381,7 +584,7 @@ int CPVREon::GetDefaultNumber(const bool isRadio, int id) {
 
 std::string CPVREon::GetBaseApi(const std::string& cdn_identifier) {
 
-  for(int i=0; i < m_cdns.size(); i++){
+  for(size_t i=0; i < m_cdns.size(); i++){
     if (m_cdns[i].identifier == cdn_identifier) {
       return m_cdns[i].baseApi;
 /*
@@ -398,7 +601,7 @@ std::string CPVREon::GetBaseApi(const std::string& cdn_identifier) {
   // renamed): use the one the broker marks as the default. All the ex-Yu
   // brands share it, so this is the correct host for anything that isn't
   // Vivacom or Nova, and a working one to fall back to for those.
-  for(int i=0; i < m_cdns.size(); i++){
+  for(size_t i=0; i < m_cdns.size(); i++){
     if (m_cdns[i].isDefault) {
       kodi::Log(ADDON_LOG_WARNING, "No CDN matched '%s'; using the broker's default CDN '%s'.",
                 cdn_identifier.c_str(), m_cdns[i].identifier.c_str());
@@ -544,17 +747,34 @@ std::string CPVREon::BuildV1DeviceBody() const
 
 std::string CPVREon::BuildV2DeviceBody(const std::string& deviceNumber) const
 {
+  // The web params leave a few fields blank because the older (v1) providers
+  // never needed them. Vivacom's v2/devices is the one contract that is sent
+  // the full browser-style body, so fill the blanks for it only.
+  const bool vivacomWeb = m_httpClient->IsVivacomSso();
+  std::string deviceName = EonParameters[m_platform].device_name;
+  std::string swVersion = EonParameters[m_platform].client_sw_version;
+  std::string swBuild = EonParameters[m_platform].client_sw_build;
+  if (vivacomWeb)
+  {
+    if (deviceName.empty())
+      deviceName = "chrome linux";
+    if (swVersion.empty())
+      swVersion = "11.8.2064";
+    if (swBuild.empty())
+      swBuild = "2064";
+  }
+
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
 
   w.StartObject();
   w.Key("deviceNumber");    w.String(deviceNumber.c_str());
-  w.Key("deviceName");      w.String(EonParameters[m_platform].device_name.c_str());
   w.Key("modelName");       w.String(EonParameters[m_platform].device_model.c_str());
-  w.Key("clientSwVersion"); w.String(EonParameters[m_platform].client_sw_version.c_str());
-  if (m_platform == PLATFORM_ANDROIDTV)
+  w.Key("deviceName");      w.String(deviceName.c_str());
+  w.Key("clientSwVersion"); w.String(swVersion.c_str());
+  if (m_platform == PLATFORM_ANDROIDTV || vivacomWeb)
   {
-    w.Key("clientSwBuild"); w.String(EonParameters[m_platform].client_sw_build.c_str());
+    w.Key("clientSwBuild"); w.String(swBuild.c_str());
   }
   w.Key("systemSwVersion");
   w.StartObject();
@@ -812,15 +1032,44 @@ bool CPVREon::GetHouseholds()
 
 std::string CPVREon::GetTime()
 {
+  // Every stream URL built for playback or for a seek embeds a ctime, and the
+  // CDN only cares that it is within ~20s of real time. What that needs is the
+  // *offset* between the backend's clock and this device's, not a fresh
+  // reading -- so measure the offset occasionally and mint ctime locally. That
+  // takes one blocking round trip out of every channel start and every seek.
+  if (m_server_time_synced &&
+      DeviceTimeMs() - m_server_time_synced_at_ms < SERVER_TIME_RESYNC_INTERVAL_MS)
+  {
+    return std::to_string(DeviceTimeMs() + m_server_time_offset_ms);
+  }
+
   std::string url = m_api + "v1/time";
 
   rapidjson::Document doc;
   if (!GetPostJson(url, "", doc)) {
     kodi::Log(ADDON_LOG_ERROR, "Failed to get time");
+    // An offset measured a while ago still beats no ctime at all; only a
+    // device that has never reached v1/time has nothing to fall back on.
+    if (m_server_time_synced)
+      return std::to_string(DeviceTimeMs() + m_server_time_offset_ms);
     return "";
   }
 
-  return Utils::JsonStringOrEmpty(doc, "time");
+  const std::string serverTime = Utils::JsonStringOrEmpty(doc, "time");
+  const int64_t serverTimeMs = serverTime.empty() ? 0 : std::strtoll(serverTime.c_str(), nullptr, 10);
+  if (serverTimeMs > 0)
+  {
+    const int64_t deviceTimeMs = DeviceTimeMs();
+    const int64_t offsetMs = serverTimeMs - deviceTimeMs;
+    if (!m_server_time_synced || std::llabs(offsetMs - m_server_time_offset_ms) > 1000)
+      kodi::Log(ADDON_LOG_INFO, "Backend clock is %lld ms ahead of this device",
+                static_cast<long long>(offsetMs));
+    m_server_time_offset_ms = offsetMs;
+    m_server_time_synced_at_ms = deviceTimeMs;
+    m_server_time_synced = true;
+  }
+
+  return serverTime;
 }
 
 bool CPVREon::GetServiceProvider()
@@ -916,6 +1165,122 @@ bool CPVREon::GetCategories(const bool isRadio)
   return true;
 }
 
+void CPVREon::SelectAccountProfile()
+{
+  // Trimmed, since a name typed with a remote easily picks up a space.
+  std::string wanted = m_settings->GetEonProfileName();
+  const auto notSpace = [](unsigned char c) { return !std::isspace(c); };
+  wanted.erase(wanted.begin(), std::find_if(wanted.begin(), wanted.end(), notSpace));
+  wanted.erase(std::find_if(wanted.rbegin(), wanted.rend(), notSpace).base(), wanted.end());
+
+  // No name means the account's default profile, and so does a name the
+  // account does not have. A session that never left the default profile has
+  // nothing to do; one that was moved earlier has to be moved back, because
+  // a stored session stays on the profile it was last given.
+  const std::string current = m_settings->GetEonActiveProfile();
+  if (wanted.empty() && current.empty())
+    return;
+
+  // Best effort throughout: whatever goes wrong here, the session stays on
+  // the profile it has and everything else works as before.
+  rapidjson::Document doc;
+  if (!GetPostJson(m_api + "v1/profiles", "", doc, false) || !doc.IsArray())
+  {
+    kodi::Log(ADDON_LOG_INFO, "Profile list unavailable; keeping the current profile.");
+    return;
+  }
+
+  const auto lowered = [](std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+  };
+
+  int profileId = 0;
+  int defaultProfileId = 0;
+  bool isDefault = false;
+  for (rapidjson::Value::ConstValueIterator itr = doc.Begin(); itr != doc.End(); ++itr)
+  {
+    if (!itr->IsObject())
+      continue;
+    const std::string name = Utils::JsonStringOrEmpty(*itr, "profileName");
+    const bool defaultProfile = Utils::JsonBoolOrFalse(*itr, "isDefault");
+    if (defaultProfile && defaultProfileId == 0)
+      defaultProfileId = Utils::JsonIntOrZero(*itr, "id");
+    const bool match = wanted.empty() ? defaultProfile
+                                      : (name == wanted || lowered(name) == lowered(wanted));
+    if (!match)
+      continue;
+
+    profileId = Utils::JsonIntOrZero(*itr, "id");
+    isDefault = defaultProfile;
+    if (wanted.empty() || name == wanted)
+      break;
+  }
+
+  std::string label = wanted.empty() ? std::string("<default>") : wanted;
+  if (profileId == 0 && !wanted.empty())
+  {
+    kodi::Log(ADDON_LOG_INFO,
+              "Profile '%s' not found among the account's %u profiles; using the default profile.",
+              label.c_str(), static_cast<unsigned int>(doc.Size()));
+    profileId = defaultProfileId;
+    isDefault = true;
+    label = "<default>";
+  }
+  if (profileId == 0)
+  {
+    kodi::Log(ADDON_LOG_INFO, "Default profile not found; keeping the current profile.");
+    return;
+  }
+
+  if (isDefault ? current.empty() : current == std::to_string(profileId))
+  {
+    kodi::Log(ADDON_LOG_INFO, "Profile '%s' (id=%i) is already active.", label.c_str(), profileId);
+    return;
+  }
+
+  const bool selected = m_httpClient->SwitchProfile(profileId);
+  kodi::Log(ADDON_LOG_INFO, "Profile '%s' (id=%i) %s.", label.c_str(), profileId,
+            selected ? "selected" : "could not be selected; keeping the current profile");
+}
+
+void CPVREon::LoadCustomChannelLists()
+{
+  // Best effort throughout: an account, provider or platform without lists
+  // of its own simply keeps the provider's categories.
+  rapidjson::Document doc;
+  if (!GetPostJson(m_api + "v1/chf?channelDetails=false", "", doc, false))
+  {
+    kodi::Log(ADDON_LOG_INFO,
+              "Custom channel lists unavailable; keeping the provider's categories only.");
+    return;
+  }
+
+  size_t skipped = 0;
+  const size_t added = AppendCustomChannelLists(doc, m_settings->IsTVenabled(),
+                                                m_settings->IsRadioenabled(), m_categories,
+                                                skipped);
+  kodi::Log(ADDON_LOG_INFO, "Loaded custom channel lists. added=%zu skipped=%zu", added, skipped);
+}
+
+void CPVREon::OrderChannelGroups()
+{
+  std::vector<GroupOrderEntry> tvOrder;
+  std::vector<GroupOrderEntry> radioOrder;
+
+  rapidjson::Document doc;
+  if (GetPostJson(m_api + "v1/preferences", "", doc, false))
+  {
+    tvOrder = ParseGroupOrder(doc, "CHF_TV_ORDER");
+    radioOrder = ParseGroupOrder(doc, "CHF_RADIO_ORDER");
+  }
+
+  ApplyGroupOrder(m_categories, tvOrder, radioOrder);
+  kodi::Log(ADDON_LOG_INFO, "Channel groups ordered. tvOrderFromAccount=%s radioOrderFromAccount=%s",
+            BoolState(!tvOrder.empty()), BoolState(!radioOrder.empty()));
+}
+
 CPVREon::CPVREon() :
   m_settings(new CSettings())
 {
@@ -986,6 +1351,10 @@ CPVREon::CPVREon() :
   }
   m_httpClient->SetApi(m_api);
   kodi::Log(ADDON_LOG_DEBUG, "API set to: %s", m_api.c_str());
+  // The login mechanism differs per brand (Vivacom signs in through its own
+  // identity provider), so tell the HTTP client which brand the provider
+  // setting stands for -- by identifier, never by list position.
+  m_httpClient->SetBrandIdentifier(ExpectedBrandIdentifier(m_settings->GetEonServiceProvider()));
 
   m_device_id = m_settings->GetEonDeviceID();
   m_device_number = m_settings->GetEonDeviceNumber();
@@ -1104,6 +1473,10 @@ CPVREon::CPVREon() :
     }
   }
 
+  // Before anything profile-dependent is read: the token decides whose
+  // channel lists and preferences the backend answers with.
+  SelectAccountProfile();
+
   if (allgood) {
     allgood = GetRenderingProfiles();
     kodi::Log(ADDON_LOG_INFO, "Startup step GetRenderingProfiles=%s totalProfiles=%zu",
@@ -1127,10 +1500,20 @@ CPVREon::CPVREon() :
     allgood = LoadChannels(true);
   }
 
+  // The viewer's own channel lists, and the order they arranged every group
+  // in. Neither is needed to watch anything, so neither can fail the start.
+  if (allgood && m_settings->IsGroupsenabled())
+  {
+    LoadCustomChannelLists();
+    OrderChannelGroups();
+  }
+
   const size_t tv_channels = std::count_if(m_channels.begin(), m_channels.end(),
                                            [](const EonChannel& channel) { return !channel.bRadio; });
   const size_t radio_channels = std::count_if(m_channels.begin(), m_channels.end(),
                                               [](const EonChannel& channel) { return channel.bRadio; });
+  LoadEpgDeliveryState();
+
   kodi::Log(ADDON_LOG_INFO,
             "Startup finished. allgood=%s totalChannels=%zu tvChannels=%zu radioChannels=%zu categories=%zu",
             BoolState(allgood), m_channels.size(), tv_channels, radio_channels, m_categories.size());
@@ -1138,6 +1521,7 @@ CPVREon::CPVREon() :
 
 CPVREon::~CPVREon()
 {
+  StopEpgPrefetch();
   m_channels.clear();
 }
 
@@ -1187,7 +1571,12 @@ bool CPVREon::LoadChannels(const bool isRadio)
     EonChannel eon_channel;
 
     eon_channel.bRadio = isRadio;
-    eon_channel.bArchive = Utils::JsonBoolOrFalse(channelItem, "cutvEnabled");
+    // The API flags radio channels cutvEnabled just like TV, but EON has no
+    // replay for radio -- a replay URL for a radio channel is refused. Keep
+    // bArchive off for radio so Kodi neither offers "Play programme" on past
+    // radio shows (IsEPGTagPlayable) nor marks the channel as having an
+    // archive (SetHasArchive); live playback and the guide are unaffected.
+    eon_channel.bArchive = !isRadio && Utils::JsonBoolOrFalse(channelItem, "cutvEnabled");
     if (eon_channel.bArchive)
       ++archive_channels;
     eon_channel.strChannelName = channame;
@@ -1205,13 +1594,7 @@ bool CPVREon::LoadChannels(const bool isRadio)
 
     eon_channel.aaEnabled = Utils::JsonBoolOrFalse(channelItem, "aaEnabled");
     eon_channel.subscribed = Utils::JsonBoolOrFalse(channelItem, "subscribed");
-    int ageRating = 0;
-    try {
-      ageRating = std::stoi(Utils::JsonStringOrEmpty(channelItem,"ageRating"));
-    } catch (std::invalid_argument&e) {
-
-    }
-    eon_channel.ageRating = ageRating;
+    eon_channel.ageRating = AgeRatingOrZero(Utils::JsonStringOrEmpty(channelItem, "ageRating"));
     const rapidjson::Value& categories = channelItem["categories"];
     for (rapidjson::Value::ConstValueIterator itr2 = categories.Begin();
         itr2 != categories.End(); ++itr2)
@@ -1441,15 +1824,21 @@ void CPVREon::SetStreamProperties(std::vector<kodi::addon::PVRStreamProperty>& p
       // growing with real time instead of capping it at the programme's
       // (possibly still in the future) end time.
       properties.emplace_back("inputstream.ffmpegdirect.stream_mode", "catchup");
-      // playForwardIndefinitely: a specific past programme selected from the
-      // guide (see GetEPGTagStreamProperties) -- it must start at ITS OWN
-      // beginning (isLive=false keeps BuildPlaybackUrl and
-      // catchup_buffer_offset targeting starttime, not "now"), but the
-      // underlying feed keeps extending past this programme's nominal end
-      // into whatever airs next, so the seekable end needs to keep growing
-      // with real time exactly like live does, not freeze at endtime.
+      // playback_as_live decides what ffmpegdirect reports as the stream's
+      // length: on means "start of the buffer until now", off means "until
+      // the buffer's end time, or now if that has not arrived yet". Live
+      // wants the first -- the programme is still being broadcast, so its
+      // timeline grows. A past programme selected from the guide wants the
+      // second, and used to get the first (via playForwardIndefinitely): a
+      // 30-minute episode that aired six hours ago was presented as a
+      // six-hour stream with the progress bar barely off its left edge.
+      // Turning it off costs nothing on the way in (a programme still on air
+      // has now < endtime, so its timeline still grows exactly as it should)
+      // and nothing on the way out either: the seekable range ffmpegdirect
+      // enforces comes from the buffer start and real time, not from this,
+      // so the feed still plays on past the programme's end.
       properties.emplace_back("inputstream.ffmpegdirect.playback_as_live",
-                               (isLive || playForwardIndefinitely) ? "true" : "false");
+                               isLive ? "true" : "false");
       properties.emplace_back("inputstream.ffmpegdirect.programme_start_time", std::to_string(starttime));
       properties.emplace_back("inputstream.ffmpegdirect.programme_end_time", std::to_string(endtime));
       properties.emplace_back("inputstream.ffmpegdirect.catchup_buffer_start_time", std::to_string(starttime));
@@ -2165,125 +2554,597 @@ PVR_ERROR CPVREon::GetDriveSpace(uint64_t& total, uint64_t& used)
   return PVR_ERROR_NO_ERROR;
 }
 
+void CPVREon::LoadEpgDeliveryState()
+{
+  const std::string path = Utils::GetFilePath(EPG_DELIVERY_STATE_FILE);
+  if (!kodi::vfs::FileExists(path, false))
+    return;
+
+  const std::string content = Utils::ReadFile(path);
+  long long deliveredAt = 0;
+  unsigned long long channels = 0;
+  long long past = 0;
+  int version = 0;
+  if (std::sscanf(content.c_str(), "%d %lld %llu %lld", &version, &deliveredAt, &channels, &past) != 4 ||
+      version != EPG_DELIVERY_STATE_VERSION || deliveredAt <= 0 || past < 0)
+  {
+    kodi::Log(ADDON_LOG_INFO, "Ignoring unreadable EPG delivery state, next refresh fetches the full guide.");
+    return;
+  }
+
+  m_epgFullPassAt = static_cast<time_t>(deliveredAt);
+  m_epgFullPassChannels = static_cast<size_t>(channels);
+  m_epgFullPassPast = static_cast<time_t>(past);
+  kodi::Log(ADDON_LOG_INFO, "Loaded EPG delivery state. fullPassAt=%lld channels=%zu pastSeconds=%lld",
+            static_cast<long long>(m_epgFullPassAt), m_epgFullPassChannels,
+            static_cast<long long>(m_epgFullPassPast));
+}
+
+void CPVREon::SaveEpgDeliveryState()
+{
+  const std::string dir = Utils::GetFilePath("");
+  if (!dir.empty() && !kodi::vfs::DirectoryExists(dir) && !kodi::vfs::CreateDirectory(dir))
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Could not create %s to store the EPG delivery state.", dir.c_str());
+    return;
+  }
+
+  const std::string path = Utils::GetFilePath(EPG_DELIVERY_STATE_FILE);
+  kodi::vfs::CFile file;
+  if (!file.OpenFileForWrite(path, true))
+  {
+    kodi::Log(ADDON_LOG_ERROR, "Could not write the EPG delivery state to %s.", path.c_str());
+    return;
+  }
+
+  const std::string content = std::to_string(EPG_DELIVERY_STATE_VERSION) + " " +
+                              std::to_string(static_cast<long long>(m_epgFullPassAt)) + " " +
+                              std::to_string(m_epgFullPassChannels) + " " +
+                              std::to_string(static_cast<long long>(m_epgFullPassPast));
+  file.Write(content.c_str(), content.size());
+}
+
+// Resolves the window a refresh actually fetches and delivers, and reports
+// through `fullWindow` whether that is everything obtainable of what Kodi
+// asked for. Kodi asks for everything from `pastdaystodisplay` ago, every
+// time, for every channel; once it has been given that history there is no
+// reason to send it again, so a refresh that follows a full one only carries
+// the recent past and the future. Resolved once per window rather than per
+// channel, so that the whole pass -- the prefetch included -- agrees on what
+// it is fetching.
+time_t CPVREon::EpgFetchStart(time_t start, time_t end, bool& fullWindow)
+{
+  fullWindow = false;
+
+  // Only a guide refresh may be shortened or take part in the shared window.
+  // Kodi also asks for a single programme around a given time, and that
+  // window can sit entirely in the past -- such a lookup is answered before
+  // the window below is touched, so one arriving in the middle of a refresh
+  // cannot displace the window that refresh is using and leave the rest of
+  // its channels re-resolving a start a few seconds later, which would miss
+  // the prefetch and fetch every one of them on its own. It still gets the
+  // archive clamp of its own; the caller treats fetchStart >= end as a range
+  // entirely outside the archive.
+  if (end - start < EPG_PREFETCH_MIN_WINDOW)
+  {
+    const time_t oldestAvailable = time(nullptr) - EPG_ARCHIVE_SECONDS;
+    return start < oldestAvailable ? oldestAvailable : start;
+  }
+
+  std::lock_guard<std::mutex> lock(m_epgWindowMutex);
+
+  if (start == m_epgWindowStart && end == m_epgWindowEnd)
+  {
+    fullWindow = m_epgWindowFullDelivery;
+    return m_epgFetchStart;
+  }
+
+  m_epgWindowStart = start;
+  m_epgWindowEnd = end;
+  m_epgFetchStart = start;
+  m_epgWindowFullDelivery = true;
+  fullWindow = true;
+
+  const time_t now = time(nullptr);
+
+  // EON keeps a rolling archive and answers anything reaching further back
+  // with HTTP 400 "invalid_input". Kodi derives the requested range from its
+  // "days to display" setting and can ask for slightly more than that, which
+  // would fail the whole request even though the bulk of it is perfectly
+  // servable. Clamped here, once per window, so the whole pass agrees on it;
+  // a pass clamped to the archive depth still counts as a full delivery,
+  // because it carried everything that can be had.
+  const time_t oldestAvailable = now - EPG_ARCHIVE_SECONDS;
+  if (m_epgFetchStart < oldestAvailable)
+  {
+    kodi::Log(ADDON_LOG_DEBUG, "[epg] clamped window start %lld to the archive depth %lld",
+              static_cast<long long>(start), static_cast<long long>(oldestAvailable));
+    m_epgFetchStart = oldestAvailable;
+  }
+
+  const time_t requestedPast = now > m_epgFetchStart ? now - m_epgFetchStart : 0;
+  const time_t trimmedStart = now - EPG_INCREMENTAL_PAST;
+
+  if (requestedPast <= EPG_INCREMENTAL_PAST || trimmedStart >= end)
+    return m_epgFetchStart; // Kodi is not asking for more history than we resend anyway.
+
+  if (m_epgFullPassAt == 0 || m_epgFullPassChannels != m_channels.size())
+    return m_epgFetchStart; // Kodi cannot have a history we never delivered.
+
+  // Kodi is displaying more history than the last full pass gave it -- someone
+  // raised `pastdaystodisplay` -- so the days it has never seen have to be
+  // delivered rather than assumed.
+  if (requestedPast > m_epgFullPassPast)
+    return m_epgFetchStart;
+
+  // Past this point Kodi would have aged out everything the last full pass
+  // gave it, so the history has to be delivered again rather than assumed.
+  if (now - m_epgFullPassAt > requestedPast)
+    return m_epgFetchStart;
+
+  m_epgFetchStart = trimmedStart;
+  m_epgWindowFullDelivery = false;
+  fullWindow = false;
+  kodi::Log(ADDON_LOG_INFO,
+            "Kodi already holds the guide history, fetching %lld days instead of %lld.",
+            static_cast<long long>((end - m_epgFetchStart) / (24 * 60 * 60)),
+            static_cast<long long>((end - start) / (24 * 60 * 60)));
+  return m_epgFetchStart;
+}
+
+EonEpgEntry CPVREon::ParseEpgEntry(const rapidjson::Value& epgItem) const
+{
+  EonEpgEntry entry;
+
+  entry.broadcastId = Utils::JsonIntOrZero(epgItem, "id");
+  entry.title = Utils::JsonStringOrEmpty(epgItem, "title");
+  entry.originalTitle = Utils::JsonStringOrEmpty(epgItem, "originalTitle");
+  entry.startTime = (time_t)(Utils::JsonInt64OrZero(epgItem, "startTime") / 1000);
+  entry.endTime = (time_t)(Utils::JsonInt64OrZero(epgItem, "endTime") / 1000);
+  entry.plot = Utils::JsonStringOrEmpty(epgItem, "shortDescription");
+  entry.seriesNumber = Utils::JsonIntOrZero(epgItem, "seasonNumber");
+  entry.episodeNumber = Utils::JsonIntOrZero(epgItem, "episodeNumber");
+  if (entry.episodeNumber != 0)
+    entry.flags += EPG_TAG_FLAG_IS_SERIES;
+
+  entry.parentalRating = AgeRatingOrZero(Utils::JsonStringOrEmpty(epgItem, "ageRating"));
+
+  if (Utils::JsonBoolOrFalse(epgItem, "liveBroadcast"))
+    entry.flags += EPG_TAG_FLAG_IS_LIVE;
+
+  if (epgItem.HasMember("images") && epgItem["images"].IsArray())
+  {
+    const rapidjson::Value& images = epgItem["images"];
+    for (rapidjson::Value::ConstValueIterator itr = images.Begin(); itr != images.End(); ++itr)
+    {
+      if (Utils::JsonStringOrEmpty(*itr, "size") == "STB_XL")
+        entry.iconPath = m_images_api + Utils::JsonStringOrEmpty(*itr, "path");
+    }
+  }
+
+  return entry;
+}
+
+// Fetches the guide for one batch of channels. Up to EPG_CHANNELS_PER_REQUEST
+// ids go into a single request; the response is an object keyed by channel id,
+// so one round trip covers the whole batch. Called from the prefetch workers
+// as well as the calling thread, and touches no shared state of its own.
+bool CPVREon::FetchEpgEntries(const std::vector<int>& channelUids,
+                              time_t start,
+                              time_t end,
+                              std::map<int, std::vector<EonEpgEntry>>& entries)
+{
+  if (channelUids.empty())
+    return true;
+
+  std::string cids;
+  for (const int channelUid : channelUids)
+  {
+    if (!cids.empty())
+      cids += ",";
+    cids += std::to_string(channelUid);
+  }
+
+  const std::string url = m_api + "v1/events/epg" +
+                                  "?cid=" + cids +
+                                  "&fromTime=" + std::to_string(start) + "000" +
+                                  "&toTime=" + std::to_string(end) + "000";
+
+  // Kodi calls this in the background to populate the EPG grid, often for
+  // many channels back-to-back (e.g. at startup) -- a modal error dialog
+  // per failed batch would be extremely disruptive. One batch's EPG
+  // failing isn't fatal: the caller retries those channels one by one, and
+  // if that fails too Kodi just shows no EPG data for them and moves on.
+  rapidjson::Document epgDoc;
+  if (!GetPostJson(url, "", epgDoc, false)) {
+    kodi::Log(ADDON_LOG_ERROR, "[GetEPG] ERROR: error while parsing json");
+    return false;
+  }
+
+  for (const int channelUid : channelUids)
+  {
+    const std::string cid = std::to_string(channelUid);
+    std::vector<EonEpgEntry>& channelEntries = entries[channelUid];
+
+    // A channel with no programmes in the window is simply absent from the
+    // response -- not an error, just nothing to add.
+    if (!epgDoc.HasMember(cid.c_str()) || !epgDoc[cid.c_str()].IsArray())
+      continue;
+
+    const rapidjson::Value& epgitems = epgDoc[cid.c_str()];
+    channelEntries.reserve(epgitems.Size());
+    for (rapidjson::Value::ConstValueIterator itr1 = epgitems.Begin();
+        itr1 != epgitems.End(); ++itr1)
+    {
+      channelEntries.emplace_back(ParseEpgEntry(*itr1));
+    }
+  }
+
+  return true;
+}
+
+// Starts (or restarts) the background prefetch for the window Kodi is
+// currently walking. Cheap to call on every GetEPGForChannel(): it returns
+// immediately once a prefetch for that same window is already running.
+void CPVREon::StartEpgPrefetch(int firstChannelUid, time_t start, time_t end, bool fullWindow)
+{
+  if (end - start < EPG_PREFETCH_MIN_WINDOW || m_channels.size() <= EPG_CHANNELS_PER_REQUEST)
+    return;
+
+  std::lock_guard<std::mutex> lifecycle(m_epgPrefetchLifecycle);
+
+  // Channels this pass has already answered on their own -- see below.
+  std::set<int> alreadyServed;
+
+  {
+    std::lock_guard<std::mutex> lock(m_epgPrefetch.mutex);
+    if (m_epgPrefetch.running && m_epgPrefetch.start == start && m_epgPrefetch.end == end)
+      return;
+
+    // Wait until enough different channels have asked for this same window to
+    // make it clear Kodi is walking the whole guide rather than refreshing a
+    // single channel. The handful of channels that get us to the threshold
+    // fetch themselves, which costs a fraction of a second.
+    if (m_epgPrefetch.observedStart != start || m_epgPrefetch.observedEnd != end)
+    {
+      m_epgPrefetch.observed.clear();
+      m_epgPrefetch.observedStart = start;
+      m_epgPrefetch.observedEnd = end;
+    }
+    m_epgPrefetch.observed.insert(firstChannelUid);
+    if (m_epgPrefetch.observed.size() < EPG_PREFETCH_TRIGGER_CHANNELS)
+      return;
+
+    alreadyServed = m_epgPrefetch.observed;
+  }
+
+  // A different window means a new update pass, which makes whatever the
+  // previous one had prefetched useless.
+  StopEpgPrefetch();
+
+  // Kodi is blocked on firstChannelUid right now, so it leads the queue.
+  //
+  // The channels that got us to the threshold are left out: each of them was
+  // answered by a one-off request of its own, so Kodi has already collected
+  // them and will not ask again this pass. Prefetching them anyway would leave
+  // their programmes sitting in `ready` for a caller that never comes, and the
+  // pass would never be seen as fully collected -- which is what records the
+  // history as delivered, so the next refresh could never be shortened.
+  std::vector<int> channelUids;
+  channelUids.reserve(m_channels.size());
+  channelUids.emplace_back(firstChannelUid);
+  for (const auto& channel : m_channels)
+  {
+    if (channel.iUniqueId != firstChannelUid && alreadyServed.count(channel.iUniqueId) == 0)
+      channelUids.emplace_back(channel.iUniqueId);
+  }
+
+  // Full-size batches are the most efficient way to pull the whole guide, but
+  // they are the slowest way to answer the first question: Kodi is waiting on
+  // one channel, and a batch of fifteen makes it wait for the other fourteen
+  // to be fetched as well. So ramp up -- the first requests are small enough
+  // to come back quickly, and by the time Kodi has worked through those the
+  // full-size batches behind them have landed.
+  std::deque<std::vector<int>> queue;
+  size_t batchSize = EPG_FIRST_BATCH_CHANNELS;
+  for (size_t i = 0; i < channelUids.size();)
+  {
+    const size_t size = std::min(batchSize, channelUids.size() - i);
+    queue.emplace_back(channelUids.begin() + i, channelUids.begin() + i + size);
+    i += size;
+    batchSize = std::min(batchSize * 2, EPG_CHANNELS_PER_REQUEST);
+  }
+
+  const size_t batches = queue.size();
+  {
+    std::lock_guard<std::mutex> lock(m_epgPrefetch.mutex);
+    m_epgPrefetch.queue = std::move(queue);
+    m_epgPrefetch.pending.clear();
+    m_epgPrefetch.pending.insert(channelUids.begin(), channelUids.end());
+    m_epgPrefetch.ready.clear();
+    m_epgPrefetch.failed.clear();
+    m_epgPrefetch.start = start;
+    m_epgPrefetch.end = end;
+    // Note: waiters is owned by the waiting callers, whose increment and
+    // decrement have to pair -- resetting it here would underflow it.
+    ++m_epgPrefetch.generation;
+    m_epgPrefetch.stop = false;
+    m_epgPrefetch.running = true;
+    m_epgPrefetch.fullWindow = fullWindow;
+    m_epgPrefetch.startedAt = std::chrono::steady_clock::now();
+    m_epgPrefetch.batchesLeft = batches;
+    m_epgPrefetch.entriesFetched = 0;
+
+    const size_t workers = std::min(EPG_PREFETCH_THREADS, batches);
+    for (size_t i = 0; i < workers; ++i)
+      m_epgPrefetch.workers.emplace_back([this] { EpgPrefetchWorker(); });
+  }
+
+  kodi::Log(ADDON_LOG_INFO,
+            "EPG prefetch started. channels=%zu served=%zu batches=%zu threads=%zu start=%lld end=%lld",
+            channelUids.size(), alreadyServed.size() - 1, batches,
+            std::min(EPG_PREFETCH_THREADS, batches),
+            static_cast<long long>(start), static_cast<long long>(end));
+}
+
+void CPVREon::StopEpgPrefetch()
+{
+  std::vector<std::thread> workers;
+  {
+    std::lock_guard<std::mutex> lock(m_epgPrefetch.mutex);
+    if (!m_epgPrefetch.running && m_epgPrefetch.workers.empty())
+      return;
+
+    m_epgPrefetch.stop = true;
+    m_epgPrefetch.running = false;
+    m_epgPrefetch.queue.clear();
+    m_epgPrefetch.pending.clear();
+    workers = std::move(m_epgPrefetch.workers);
+    m_epgPrefetch.workers.clear();
+  }
+
+  // Wakes both the workers and anyone waiting on a channel that will now
+  // never arrive; a worker already inside a request finishes it first.
+  m_epgPrefetch.cv.notify_all();
+  for (auto& worker : workers)
+  {
+    if (worker.joinable())
+      worker.join();
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(m_epgPrefetch.mutex);
+    m_epgPrefetch.ready.clear();
+    m_epgPrefetch.failed.clear();
+    m_epgPrefetch.stop = false;
+  }
+}
+
+void CPVREon::EpgPrefetchWorker()
+{
+  for (;;)
+  {
+    std::vector<int> batch;
+    time_t start = 0;
+    time_t end = 0;
+    uint64_t generation = 0;
+
+    {
+      std::unique_lock<std::mutex> lock(m_epgPrefetch.mutex);
+
+      // Hold off once enough channels are sitting uncollected -- unless
+      // someone is actually waiting, in which case running ahead is the whole
+      // point and the cap would deadlock us against the blocked caller.
+      m_epgPrefetch.cv.wait(lock, [this] {
+        return m_epgPrefetch.stop || m_epgPrefetch.queue.empty() ||
+               m_epgPrefetch.ready.size() < EPG_PREFETCH_MAX_READY ||
+               m_epgPrefetch.waiters > 0;
+      });
+
+      if (m_epgPrefetch.stop || m_epgPrefetch.queue.empty())
+        return;
+
+      batch = std::move(m_epgPrefetch.queue.front());
+      m_epgPrefetch.queue.pop_front();
+      start = m_epgPrefetch.start;
+      end = m_epgPrefetch.end;
+      generation = m_epgPrefetch.generation;
+    }
+
+    std::map<int, std::vector<EonEpgEntry>> fetched;
+    const bool fetched_ok = FetchEpgEntries(batch, start, end, fetched);
+
+    {
+      std::lock_guard<std::mutex> lock(m_epgPrefetch.mutex);
+      if (m_epgPrefetch.stop || m_epgPrefetch.generation != generation)
+        return;
+
+      for (const int channelUid : batch)
+      {
+        if (fetched_ok)
+        {
+          m_epgPrefetch.entriesFetched += fetched[channelUid].size();
+          m_epgPrefetch.ready[channelUid] = std::move(fetched[channelUid]);
+        }
+        else
+          m_epgPrefetch.failed.insert(channelUid);
+        m_epgPrefetch.pending.erase(channelUid);
+      }
+
+      // Whoever lands the last batch reports the run: how long the whole
+      // guide took to pull, and how much of it there was.
+      if (m_epgPrefetch.batchesLeft > 0 && --m_epgPrefetch.batchesLeft == 0)
+      {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - m_epgPrefetch.startedAt);
+        kodi::Log(ADDON_LOG_INFO, "EPG prefetch finished. entries=%zu failed=%zu elapsed=%lldms",
+                  m_epgPrefetch.entriesFetched, m_epgPrefetch.failed.size(),
+                  static_cast<long long>(elapsed.count()));
+      }
+    }
+    m_epgPrefetch.cv.notify_all();
+  }
+}
+
+// Hands over this channel's prefetched programmes, waiting for them if the
+// workers haven't got there yet. False means the caller has to fetch the
+// channel itself: no prefetch for this window, the batch failed, or it timed
+// out.
+bool CPVREon::TakePrefetchedEpg(int channelUid,
+                                time_t start,
+                                time_t end,
+                                std::vector<EonEpgEntry>& entries)
+{
+  std::unique_lock<std::mutex> lock(m_epgPrefetch.mutex);
+
+  if (!m_epgPrefetch.running || m_epgPrefetch.start != start || m_epgPrefetch.end != end)
+    return false;
+
+  if (m_epgPrefetch.ready.count(channelUid) == 0 &&
+      m_epgPrefetch.pending.count(channelUid) == 0)
+    return false;
+
+  const uint64_t generation = m_epgPrefetch.generation;
+
+  // Kodi collects the channels in its own order, so the batch holding this one
+  // may still be sitting in the queue. Move it to the front instead of waiting
+  // for the workers to arrive at it in their own time.
+  for (size_t i = 0; i < m_epgPrefetch.queue.size(); ++i)
+  {
+    if (std::find(m_epgPrefetch.queue[i].begin(), m_epgPrefetch.queue[i].end(), channelUid) !=
+        m_epgPrefetch.queue[i].end())
+    {
+      std::rotate(m_epgPrefetch.queue.begin(), m_epgPrefetch.queue.begin() + i,
+                  m_epgPrefetch.queue.end());
+      break;
+    }
+  }
+
+  ++m_epgPrefetch.waiters;
+  m_epgPrefetch.cv.notify_all();
+  const bool arrived = m_epgPrefetch.cv.wait_for(
+      lock, std::chrono::seconds(EPG_PREFETCH_TIMEOUT_SECONDS), [this, channelUid, generation] {
+        return m_epgPrefetch.stop || m_epgPrefetch.generation != generation ||
+               m_epgPrefetch.ready.count(channelUid) > 0 ||
+               m_epgPrefetch.failed.count(channelUid) > 0;
+      });
+  --m_epgPrefetch.waiters;
+
+  const auto it = m_epgPrefetch.ready.find(channelUid);
+  if (!arrived || m_epgPrefetch.stop || m_epgPrefetch.generation != generation ||
+      it == m_epgPrefetch.ready.end())
+  {
+    if (!arrived)
+      kodi::Log(ADDON_LOG_ERROR, "EPG prefetch timed out for channel %i, fetching it directly.",
+                channelUid);
+    lock.unlock();
+    m_epgPrefetch.cv.notify_all();
+    return false;
+  }
+
+  entries = std::move(it->second);
+  m_epgPrefetch.ready.erase(it);
+
+  // Kodi walks the channels one at a time and does its own work on each
+  // answer, so the pass goes on well past the point where the fetching is
+  // done. Reporting when the last channel is collected, next to the line
+  // saying when the fetch finished, is what tells the two apart.
+  bool passDeliveredFullWindow = false;
+  if (m_epgPrefetch.ready.empty() && m_epgPrefetch.pending.empty() &&
+      m_epgPrefetch.queue.empty())
+  {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - m_epgPrefetch.startedAt);
+    kodi::Log(ADDON_LOG_INFO, "EPG prefetch fully collected by Kodi. elapsed=%lldms full=%s",
+              static_cast<long long>(elapsed.count()), BoolState(m_epgPrefetch.fullWindow));
+    passDeliveredFullWindow = m_epgPrefetch.fullWindow && m_epgPrefetch.failed.empty();
+  }
+
+  // Collecting one frees a slot under EPG_PREFETCH_MAX_READY.
+  lock.unlock();
+  m_epgPrefetch.cv.notify_all();
+
+  // Kodi has now taken every channel of a pass that carried the whole window,
+  // so the next refresh may leave the history to it. Recorded off the prefetch
+  // lock: it writes a file, and the workers have no reason to wait for that.
+  if (passDeliveredFullWindow)
+  {
+    const time_t now = time(nullptr);
+    m_epgFullPassAt = now;
+    m_epgFullPassChannels = m_channels.size();
+    m_epgFullPassPast = now > start ? now - start : 0;
+    SaveEpgDeliveryState();
+  }
+
+  return true;
+}
+
 PVR_ERROR CPVREon::GetEPGForChannel(int channelUid,
                                      time_t start,
                                      time_t end,
                                      kodi::addon::PVREPGTagsResultSet& results)
 {
   kodi::Log(ADDON_LOG_DEBUG, "function call: [%s]", __FUNCTION__);
-  for (const auto& channel : m_channels)
+
+  const bool known_channel =
+      std::any_of(m_channels.begin(), m_channels.end(),
+                  [channelUid](const EonChannel& channel) {
+                    return channel.iUniqueId == channelUid;
+                  });
+  if (!known_channel)
+    return PVR_ERROR_NO_ERROR;
+
+  // Kodi asks for its whole guide window every time; what we actually have to
+  // fetch and deliver may be a shorter one -- see EpgFetchStart().
+  bool fullWindow = false;
+  const time_t fetchStart = EpgFetchStart(start, end, fullWindow);
+
+  if (fetchStart >= end)
   {
+    kodi::Log(ADDON_LOG_DEBUG,
+              "[epg] channel %u: requested range lies entirely outside the archive window",
+              channelUid);
+    return PVR_ERROR_NO_ERROR;
+  }
 
-    if (channel.iUniqueId != channelUid)
-      continue;
+  kodi::Log(ADDON_LOG_DEBUG, "EPG Request for Channel %u Start %lld End %lld", channelUid,
+            static_cast<long long>(fetchStart), static_cast<long long>(end));
 
-    kodi::Log(ADDON_LOG_DEBUG, "EPG Request for Channel %u Start %lld End %lld", channel.iUniqueId,
-              static_cast<long long>(start), static_cast<long long>(end));
+  StartEpgPrefetch(channelUid, fetchStart, end, fullWindow);
 
-    // EON keeps a rolling 7-day archive and answers anything reaching further
-    // back with HTTP 400 "invalid_input". Kodi derives the requested range
-    // from its "days to display" setting and can ask for slightly more than
-    // that (it schedules a table update once and then retries the very same
-    // absolute range for hours, so the start only drifts further out of
-    // range), which fails the whole request even though the bulk of it is
-    // perfectly servable.
-    const time_t oldestAvailable = time(nullptr) - EPG_ARCHIVE_SECONDS;
-    const time_t fromTime = std::max(start, oldestAvailable);
-
-    if (end <= fromTime)
-    {
-      kodi::Log(ADDON_LOG_DEBUG,
-                "[epg] channel %u: requested range lies entirely outside the archive window",
-                channel.iUniqueId);
-      return PVR_ERROR_NO_ERROR;
-    }
-
-    if (fromTime != start)
-      kodi::Log(ADDON_LOG_DEBUG, "[epg] channel %u: clamped start %lld to %lld",
-                channel.iUniqueId, static_cast<long long>(start),
-                static_cast<long long>(fromTime));
-
-    std::string url = m_api + "v1/events/epg" +
-                              "?cid=" + std::to_string(channel.iUniqueId) +
-                              "&fromTime=" + std::to_string(fromTime) + "000" +
-                              "&toTime=" + std::to_string(end) + "000";
-
-    // Kodi calls this in the background to populate the EPG grid, often for
-    // many channels back-to-back (e.g. at startup) -- a modal error dialog
-    // per failed channel would be extremely disruptive. One channel's EPG
-    // failing isn't fatal: Kodi just shows no EPG data for it and moves on.
-    rapidjson::Document epgDoc;
-    if (!GetPostJson(url, "", epgDoc, false)) {
-      kodi::Log(ADDON_LOG_ERROR, "[GetEPG] ERROR: error while parsing json");
+  std::vector<EonEpgEntry> entries;
+  if (!TakePrefetchedEpg(channelUid, fetchStart, end, entries))
+  {
+    std::map<int, std::vector<EonEpgEntry>> fetched;
+    if (!FetchEpgEntries({channelUid}, fetchStart, end, fetched))
       return PVR_ERROR_SERVER_ERROR;
-    }
 
-    kodi::Log(ADDON_LOG_DEBUG, "[epg] iterate entries");
+    entries = std::move(fetched[channelUid]);
+  }
 
-//    std::string cid = "\"" + std::to_string(channel.referenceID) + "\"";
-    std::string cid = std::to_string(channel.iUniqueId);
-//    kodi::Log(ADDON_LOG_DEBUG, "EPG Channel ReferenceID: %s", cid.c_str());
-    const rapidjson::Value& epgitems = epgDoc[cid.c_str()];
-//    kodi::Log(ADDON_LOG_DEBUG, "EPG Items: %s", epgitems.c_str());
-    for (rapidjson::Value::ConstValueIterator itr1 = epgitems.Begin();
-        itr1 != epgitems.End(); ++itr1)
-    {
-      const rapidjson::Value& epgItem = (*itr1);
+  kodi::Log(ADDON_LOG_DEBUG, "[epg] iterate entries");
 
-      kodi::addon::PVREPGTag tag;
-      unsigned int epg_tag_flags = EPG_TAG_FLAG_UNDEFINED;
+  for (const auto& entry : entries)
+  {
+    kodi::addon::PVREPGTag tag;
 
-      tag.SetUniqueBroadcastId(Utils::JsonIntOrZero(epgItem,"id"));
-      tag.SetUniqueChannelId(channelUid);
-      tag.SetTitle(Utils::JsonStringOrEmpty(epgItem,"title"));
-      tag.SetOriginalTitle(Utils::JsonStringOrEmpty(epgItem,"originalTitle"));
-      time_t starttime = (time_t) (Utils::JsonInt64OrZero(epgItem,"startTime") / 1000);
-      time_t endtime = (time_t) (Utils::JsonInt64OrZero(epgItem,"endTime") / 1000);
-      tag.SetStartTime(starttime);
-      tag.SetEndTime(endtime);
-      tag.SetPlot(Utils::JsonStringOrEmpty(epgItem,"shortDescription"));
-      int seasonNumber = Utils::JsonIntOrZero(epgItem,"seasonNumber");
-      if (seasonNumber != 0)
-        tag.SetSeriesNumber(seasonNumber);
-      int episodeNumber = Utils::JsonIntOrZero(epgItem,"episodeNumber");
-      if (episodeNumber != 0)
-      {
-        tag.SetEpisodeNumber(episodeNumber);
-        epg_tag_flags += EPG_TAG_FLAG_IS_SERIES;
-      }
-      int ageRating = 0;
-      try {
-        ageRating = std::stoi(Utils::JsonStringOrEmpty(epgItem,"ageRating"));
-      } catch (std::invalid_argument&e) {
-
-      }
-      if (ageRating != 0)
-        tag.SetParentalRating(ageRating);
-
-      if (Utils::JsonBoolOrFalse(epgItem, "liveBroadcast"))
-        epg_tag_flags += EPG_TAG_FLAG_IS_LIVE;
-
-      const rapidjson::Value& images = epgItem["images"];
-      for (rapidjson::Value::ConstValueIterator itr2 = images.Begin();
-          itr2 != images.End(); ++itr2)
-      {
-        const rapidjson::Value& imageItem = (*itr2);
-
-        if (Utils::JsonStringOrEmpty(imageItem, "size") == "STB_XL") {
-          tag.SetIconPath(m_images_api + Utils::JsonStringOrEmpty(imageItem, "path"));
-        }
-      }
-/*
-      const rapidjson::Value& categories = epgItem["categories"];
-      for (rapidjson::SizeType i = 0; i < categories.Size(); i++)
-      {
-        kodi::Log(ADDON_LOG_DEBUG, "Category: %u", categories[i].GetInt());
-      }
-*/
-//      kodi::Log(ADDON_LOG_DEBUG, "%u adding EPG: ID: %u Title: %s Start: %u End: %u", channelUid, Utils::JsonIntOrZero(epgItem,"id"), Utils::JsonStringOrEmpty(epgItem,"title").c_str(),Utils::JsonIntOrZero(epgItem,"startTime")/1000,Utils::JsonIntOrZero(epgItem,"endTime")/1000);
-      tag.SetFlags(epg_tag_flags);
-      results.Add(tag);
-    }
+    tag.SetUniqueBroadcastId(entry.broadcastId);
+    tag.SetUniqueChannelId(channelUid);
+    tag.SetTitle(entry.title);
+    tag.SetOriginalTitle(entry.originalTitle);
+    tag.SetStartTime(entry.startTime);
+    tag.SetEndTime(entry.endTime);
+    tag.SetPlot(entry.plot);
+    if (entry.seriesNumber != 0)
+      tag.SetSeriesNumber(entry.seriesNumber);
+    if (entry.episodeNumber != 0)
+      tag.SetEpisodeNumber(entry.episodeNumber);
+    if (entry.parentalRating != 0)
+      tag.SetParentalRating(entry.parentalRating);
+    if (!entry.iconPath.empty())
+      tag.SetIconPath(entry.iconPath);
+    tag.SetFlags(entry.flags);
+    results.Add(tag);
   }
 
   return PVR_ERROR_NO_ERROR;
@@ -2296,7 +3157,7 @@ PVR_ERROR CPVREon::IsEPGTagPlayable(const kodi::addon::PVREPGTag& tag, bool& bIs
 
   for (const auto& channel : m_channels)
   {
-    if (channel.iUniqueId == tag.GetUniqueChannelId())
+    if (channel.iUniqueId == static_cast<int>(tag.GetUniqueChannelId()))
     {
       auto current_time = time(NULL);
       if (current_time > tag.GetStartTime())
@@ -2320,8 +3181,23 @@ PVR_ERROR CPVREon::GetEPGTagStreamProperties(
             static_cast<long long>(tag.GetEndTime()));
   for (const auto& channel : m_channels)
   {
-    if (channel.iUniqueId == tag.GetUniqueChannelId())
+    if (channel.iUniqueId == static_cast<int>(tag.GetUniqueChannelId()))
     {
+      // EON has no replay for radio (see LoadChannels). bArchive is off for
+      // radio, so Kodi should no longer ask to play a past radio programme
+      // -- but guide data cached by an older version of this addon still
+      // can. Play the channel live instead of failing with an error.
+      if (channel.bRadio)
+      {
+        kodi::Log(ADDON_LOG_INFO,
+                  "Radio has no replay; playing channel %s live instead of the selected programme.",
+                  channel.strChannelName.c_str());
+        m_stream_is_live = true;
+        m_stream_start_time = 0;
+        m_stream_end_time = 0;
+        return GetStreamProperties(channel, properties, 0, 0, /*isLive=*/true);
+      }
+
       if (UseExperimentalNativeStream())
       {
         const time_t now = time(nullptr);
@@ -2355,35 +3231,60 @@ PVR_ERROR CPVREon::GetEPGTagStreamProperties(
         return PVR_ERROR_NO_ERROR;
       }
 
-      // Deliberately NOT handed off via PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE:
-      // that makes Kodi open a channel FileItem rather than an EPG-tag one,
-      // which registers this replay session as "playing that channel". Once
-      // it is, selecting the channel's currently airing programme in the
-      // guide silently does nothing at all -- Kodi's
-      // CPVRGUIActionsPlayback::SwitchToChannel() short-circuits on
-      // IsPlayingChannel() and only sends GUI_MSG_FULLSCREEN, so the past
-      // programme just keeps playing and the user has no way back to live
-      // short of stopping playback first.
+      // How Kodi is asked to open the programme decides which controls the
+      // viewer gets, and each way has a price:
       //
-      // The cost of keeping it an EPG-tag session is that Kodi pins the
-      // displayed title to this tag for the session's lifetime (by design;
-      // it only tracks EPG info dynamically for channel-type sessions),
-      // which shows once playback runs past this programme's scheduled end
-      // -- EON's replay/catchup manifest never sets #EXT-X-ENDLIST, so it
-      // is a continuously-extending feed that carries on into whatever airs
-      // next rather than a finite recording. Stale title text is a far
-      // smaller problem than being unable to return to live, and
-      // playForwardIndefinitely below keeps the timeline itself correct
-      // across that transition.
+      // As a channel (PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE): Kodi keeps its
+      // live TV controls and follows the guide for the title. It then drops
+      // these properties and asks for the channel's own, so the request is
+      // remembered here and picked up in GetChannelStreamProperties(). The
+      // price: Kodi now regards that channel as playing, so selecting its
+      // currently airing programme in the guide does nothing at all --
+      // CPVRGUIActionsPlayback::SwitchToChannel() short-circuits on
+      // IsPlayingChannel() and only sends GUI_MSG_FULLSCREEN -- and the way
+      // back to live is to stop playback first.
+      //
+      // As a guide item (below): the way back to live through the guide
+      // works, but Kodi shows its video controls and pins the displayed
+      // title to this programme for the session's lifetime, which shows once
+      // playback runs past the programme's scheduled end -- the replay
+      // manifest never sets #EXT-X-ENDLIST, so it is a continuously
+      // extending feed that carries on into whatever airs next.
+      //
+      // Offered with inputstream.ffmpegdirect only; other inputstreams keep
+      // the guide item.
+      if (m_settings->ReplayAsChannel() &&
+          m_settings->GetInputstream() == INPUTSTREAM_FFMPEGDIRECT)
+      {
+        m_pendingPlayback = {};
+        m_pendingPlayback.active = true;
+        m_pendingPlayback.channelUid = channel.iUniqueId;
+        m_pendingPlayback.startTime = tag.GetStartTime();
+        m_pendingPlayback.endTime = tag.GetEndTime();
+        m_pendingPlayback.initialPlaybackTime = tag.GetStartTime();
+        m_pendingPlayback.requestTime = time(nullptr);
+        properties.emplace_back(PVR_STREAM_PROPERTY_EPGPLAYBACKASLIVE, "true");
+        kodi::Log(ADDON_LOG_INFO,
+                  "Queued guide programme to play as a channel. channel=%s uid=%i start=%lld end=%lld",
+                  channel.strChannelName.c_str(), channel.iUniqueId,
+                  static_cast<long long>(m_pendingPlayback.startTime),
+                  static_cast<long long>(m_pendingPlayback.endTime));
+        return PVR_ERROR_NO_ERROR;
+      }
+
+      // playForwardIndefinitely keeps seeking working once playback runs
+      // past the programme's end (the displayed length stays the
+      // programme's own -- see playback_as_live in SetStreamProperties).
       m_stream_is_live = false;
       m_stream_start_time = tag.GetStartTime();
       m_stream_end_time = tag.GetEndTime();
 
       // playForwardIndefinitely: the underlying feed keeps extending past
-      // this programme's nominal end, so the seekable end has to keep
-      // growing with real time instead of freezing at endtime (see
-      // SetStreamProperties), otherwise progress and seeking break the
-      // moment playback continues into the next programme.
+      // this programme's nominal end, so the seek proxy must keep treating
+      // the session as catchup (m_live_using_catchup) and minting fresh
+      // URLs once playback continues into the next programme. The reported
+      // length is the programme's own either way (see playback_as_live in
+      // SetStreamProperties).
       return GetStreamProperties(channel, properties, tag.GetStartTime(), tag.GetEndTime(),
                                  /*isLive=*/false, /*playForwardIndefinitely=*/true);
     }
@@ -2458,7 +3359,18 @@ PVR_ERROR CPVREon::GetStreamProperties(
               static_cast<long long>(starttime),
               static_cast<long long>(endtime));
     EonPlaybackUrlResult playback;
-    if (!BuildPlaybackUrl(channel, starttime, endtime, isLive, playback, true))
+    // Diagnostics cost a blocking manifest fetch before playback can even
+    // start -- and on the very session URL handed to the player, whose
+    // opening playlist window is then already served -- which is a lot to
+    // pay on every channel start for log lines nobody is reading unless
+    // they are chasing a stream problem.
+    //
+    // Radio is the exception and always gets that fetch. Its URL goes to
+    // Kodi's audio player as it is, and the edge answers that player's
+    // request with HTTP 403 unless the add-on has requested the very same
+    // URL first; with the fetch every station plays, without it none does.
+    if (!BuildPlaybackUrl(channel, starttime, endtime, isLive, playback,
+                          m_settings->LogStreamDiagnostics() || channel.bRadio))
       return PVR_ERROR_SERVER_ERROR;
 
     bool catchupProxyReady = false;
@@ -2488,9 +3400,12 @@ PVR_ERROR CPVREon::GetStreamProperties(
       sp.platform = m_platform;
       sp.maxBitrate = static_cast<unsigned int>(playback.bitrate);
       sp.videoBitrate = static_cast<unsigned int>(playback.videoBitrate);
-      // The CDN rejects a stale ctime (>~20s old), so the proxy fetches
-      // this fresh for every seek rather than relying on a cached offset.
+      // Fallback for a seek URL's ctime when the measured offset below is
+      // unknown or stale -- see FetchServerTime() in StreamRedirectProxy.
       sp.apiTimeUrl = m_api + "v1/time";
+      sp.serverTimeOffsetMs = m_server_time_offset_ms;
+      sp.serverTimeMeasuredAtMs = m_server_time_synced_at_ms;
+      sp.serverTimeKnown = m_server_time_synced;
       sp.accessToken = m_settings->GetEonAccessToken();
       sp.userAgent = GetUserAgent();
       sp.qualityPreference = m_settings->GetFfmpegdirectQuality();
@@ -2568,6 +3483,27 @@ PVR_ERROR CPVREon::GetChannelStreamProperties(
   EonChannel addonChannel;
   if (GetChannel(channel, addonChannel)) {
     if (addonChannel.subscribed) {
+      // A programme from the guide that Kodi was asked to open as a channel
+      // (see GetEPGTagStreamProperties) arrives here as a plain channel
+      // request. Any channel request uses the remembered one up, so it can
+      // never leak into a later tune.
+      const EonPendingPlayback pending = m_pendingPlayback;
+      m_pendingPlayback = {};
+      if (pending.active && pending.channelUid == addonChannel.iUniqueId &&
+          time(nullptr) - pending.requestTime <= PENDING_PLAYBACK_TTL_SECONDS)
+      {
+        m_stream_is_live = false;
+        m_stream_start_time = pending.startTime;
+        m_stream_end_time = pending.endTime;
+        kodi::Log(ADDON_LOG_INFO,
+                  "Playing queued guide programme as a channel. channel=%s uid=%i start=%lld end=%lld",
+                  addonChannel.strChannelName.c_str(), addonChannel.iUniqueId,
+                  static_cast<long long>(pending.startTime),
+                  static_cast<long long>(pending.endTime));
+        return GetStreamProperties(addonChannel, properties, pending.startTime, pending.endTime,
+                                   /*isLive=*/false, /*playForwardIndefinitely=*/true);
+      }
+
       m_stream_is_live = true;
       m_stream_start_time = 0;
       m_stream_end_time = 0;
@@ -2577,24 +3513,45 @@ PVR_ERROR CPVREon::GetChannelStreamProperties(
       // show (not just what ffmpegdirect's local timeshift buffer has
       // captured since tune-in), and as the progress bar range.
       const time_t now = time(nullptr);
-      const std::string epgUrl = m_api + "v1/events/epg" +
-                                 "?cid=" + std::to_string(addonChannel.iUniqueId) +
-                                 "&fromTime=" + std::to_string(now) + "000" +
-                                 "&toTime=" + std::to_string(now + 1) + "000";
-      // Best-effort only: already has a graceful fallback below (falls back
-      // to stream_mode=timeshift if this fails) -- a modal error dialog for
-      // a transient/unrelated backend hiccup on live channel tune-in would
-      // be a jarring false alarm, not something the user needs to act on.
-      rapidjson::Document epgDoc;
-      if (GetPostJson(epgUrl, "", epgDoc, false))
+
+      // The answer only changes when the programme does, so a remembered one
+      // is still correct for as long as that programme is on air -- and
+      // channel flipping revisits the same channels constantly. Reusing it
+      // keeps a blocking round trip out of the tune-in path entirely.
+      const auto airing = m_airing_programmes.find(addonChannel.iUniqueId);
+      if (airing != m_airing_programmes.end() && now >= airing->second.startTime &&
+          now < airing->second.endTime)
       {
-        const std::string cid = std::to_string(addonChannel.iUniqueId);
-        if (epgDoc.HasMember(cid.c_str()) && epgDoc[cid.c_str()].IsArray() &&
-            epgDoc[cid.c_str()].Size() > 0)
+        m_stream_start_time = airing->second.startTime;
+        m_stream_end_time = airing->second.endTime;
+        kodi::Log(ADDON_LOG_DEBUG,
+                  "Reusing known airing programme for channel uid=%i start=%lld end=%lld",
+                  addonChannel.iUniqueId, static_cast<long long>(m_stream_start_time),
+                  static_cast<long long>(m_stream_end_time));
+      }
+      else
+      {
+        const std::string epgUrl = m_api + "v1/events/epg" +
+                                   "?cid=" + std::to_string(addonChannel.iUniqueId) +
+                                   "&fromTime=" + std::to_string(now) + "000" +
+                                   "&toTime=" + std::to_string(now + 1) + "000";
+        // Best-effort only: already has a graceful fallback below (falls back
+        // to stream_mode=timeshift if this fails) -- a modal error dialog for
+        // a transient/unrelated backend hiccup on live channel tune-in would
+        // be a jarring false alarm, not something the user needs to act on.
+        rapidjson::Document epgDoc;
+        if (GetPostJson(epgUrl, "", epgDoc, false))
         {
-          const rapidjson::Value& epgItem = epgDoc[cid.c_str()][0];
-          m_stream_start_time = (time_t)(Utils::JsonInt64OrZero(epgItem, "startTime") / 1000);
-          m_stream_end_time = (time_t)(Utils::JsonInt64OrZero(epgItem, "endTime") / 1000);
+          const std::string cid = std::to_string(addonChannel.iUniqueId);
+          if (epgDoc.HasMember(cid.c_str()) && epgDoc[cid.c_str()].IsArray() &&
+              epgDoc[cid.c_str()].Size() > 0)
+          {
+            const rapidjson::Value& epgItem = epgDoc[cid.c_str()][0];
+            m_stream_start_time = (time_t)(Utils::JsonInt64OrZero(epgItem, "startTime") / 1000);
+            m_stream_end_time = (time_t)(Utils::JsonInt64OrZero(epgItem, "endTime") / 1000);
+            if (m_stream_start_time > 0 && m_stream_end_time > now)
+              m_airing_programmes[addonChannel.iUniqueId] = {m_stream_start_time, m_stream_end_time};
+          }
         }
       }
 
@@ -2628,6 +3585,30 @@ PVR_ERROR CPVREon::GetChannelGroups(bool bRadio, kodi::addon::PVRChannelGroupsRe
     kodi::addon::PVRChannelGroup kodiGroup;
 
     if (bRadio == it->isRadio) {
+      // Show a group only if it holds at least one channel of the matching
+      // type, so TV-only categories never appear in the Radio menu (and
+      // radio-only ones never appear in TV).
+      bool hasMatchingChannel = false;
+      for (const auto& catChannel : it->channels)
+      {
+        for (const auto& channel : m_channels)
+        {
+          if (channel.iUniqueId == catChannel.id && channel.bRadio == bRadio)
+          {
+            hasMatchingChannel = true;
+            break;
+          }
+        }
+        if (hasMatchingChannel)
+          break;
+      }
+      if (!hasMatchingChannel)
+      {
+        kodi::Log(ADDON_LOG_DEBUG, "Group skipped (no %s channels): %s",
+                  bRadio ? "radio" : "tv", it->name.c_str());
+        continue;
+      }
+
       kodiGroup.SetPosition(it->order);
       kodiGroup.SetIsRadio(it->isRadio); /* is radio group */
       kodiGroup.SetGroupName(it->name);
@@ -2643,18 +3624,42 @@ PVR_ERROR CPVREon::GetChannelGroups(bool bRadio, kodi::addon::PVRChannelGroupsRe
 PVR_ERROR CPVREon::GetChannelGroupMembers(const kodi::addon::PVRChannelGroup& group,
                                            kodi::addon::PVRChannelGroupMembersResultSet& results)
 {
+  const bool groupIsRadio = group.GetIsRadio();
+
   for (const auto& cgroup : m_categories)
   {
-    if (cgroup.name != group.GetGroupName())
+    // Match by name AND by radio/TV type: the TV and Radio sides can both
+    // carry an "All" category under the same localized name, and matching
+    // by name alone returned the TV category (with TV channels) for the
+    // Radio group.
+    if (cgroup.name != group.GetGroupName() || cgroup.isRadio != groupIsRadio)
       continue;
 
     for (const auto& channel : cgroup.channels)
     {
+      // Only add channels that really are of this group's type.
+      bool typeMatches = false;
+      for (const auto& addonChannel : m_channels)
+      {
+        if (addonChannel.iUniqueId == channel.id && addonChannel.bRadio == groupIsRadio)
+        {
+          typeMatches = true;
+          break;
+        }
+      }
+      if (!typeMatches)
+        continue;
+
       kodi::addon::PVRChannelGroupMember kodiGroupMember;
 
       kodiGroupMember.SetGroupName(group.GetGroupName());
       kodiGroupMember.SetChannelUniqueId(static_cast<unsigned int>(channel.id));
       kodiGroupMember.SetChannelNumber(static_cast<unsigned int>(channel.position));
+      // The order is the only per-group value Kodi reads from a member (it
+      // drives the "Backend order" sort); the number above is not used.
+      // Written to the structure directly, because SetOrder() takes a bool
+      // and would turn every position into 1.
+      static_cast<PVR_CHANNEL_GROUP_MEMBER*>(kodiGroupMember)->iOrder = channel.position;
 
       results.Add(kodiGroupMember);
     }

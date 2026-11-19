@@ -28,13 +28,13 @@ jobs:
         if [[ $DEBIAN_BUILD == true ]]; then sudo apt-get install fakeroot; fi
         if [[ $RUNNER_OS == 'macOS' ]]; then brew install automake; fi
     - name: Checkout Kodi repo
-      uses: actions/checkout@v2
+      uses: actions/checkout@v7
       with:
         repository: xbmc/xbmc
         ref: Omega
         path: xbmc
     - name: Checkout pvr.eon repo
-      uses: actions/checkout@v2
+      uses: actions/checkout@v7
       with:
         path: ${{ env.app_id }}
     - name: Configure
