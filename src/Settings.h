@@ -26,6 +26,11 @@ public:
   const int& GetAgeRating() const { return m_eonAgeRating; }
   const std::string& GetEonUsername() const { return m_eonUsername; }
   const std::string& GetEonPassword() const { return m_eonPassword; }
+  // Name of the account's viewer profile to use; empty = the default one.
+  const std::string& GetEonProfileName() const { return m_eonProfileName; }
+  // Id of the non-default profile the stored session is bound to; empty
+  // while it is on the account's default profile.
+  const std::string& GetEonActiveProfile() const { return m_eonActiveProfile; }
   const std::string& GetEonAccessToken() const { return m_eonAccessToken; }
   const std::string& GetEonRefreshToken() const { return m_eonRefreshToken; }
   const std::string& GetEonDeviceNumber() const { return m_eonDeviceNumber; }
@@ -46,6 +51,12 @@ public:
   const bool UseShortNames() const  { return m_shortnames; }
   const bool UseExperimentalNativeStream() const { return m_experimentalNativeStream; }
   const bool UseCustomUserAgent() const { return m_useCustomUserAgent; }
+  // Fetches the manifest purely to log what the backend served, so it is off
+  // unless someone is chasing a stream problem.
+  const bool LogStreamDiagnostics() const { return m_logStreamDiagnostics; }
+  // inputstream.ffmpegdirect: open a programme from the guide as a channel
+  // (live TV controls) rather than as a guide item (video controls).
+  const bool ReplayAsChannel() const { return m_replayAsChannel; }
   const std::string& GetCustomUserAgent() const { return m_customUserAgent; }
 
 private:
@@ -57,6 +68,8 @@ private:
   int m_eonAgeRating = 18;
   std::string m_eonUsername;
   std::string m_eonPassword;
+  std::string m_eonProfileName;
+  std::string m_eonActiveProfile;
   std::string m_eonAccessToken;
   std::string m_eonRefreshToken;
   std::string m_eonDeviceNumber;
@@ -77,4 +90,6 @@ private:
   bool m_shortnames = false;
   bool m_experimentalNativeStream = false;
   bool m_useCustomUserAgent = false;
+  bool m_logStreamDiagnostics = false;
+  bool m_replayAsChannel = false;
 };

@@ -5,7 +5,11 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    # Cross-compiled on the Intel image: the toolchain targets arm64 through
+    # --host below either way, and the hosted arm64 Macs can sit in the
+    # queue until the job is given up on.
+    #     runs-on: macos-15
+    runs-on: macos-15-intel
     env:
       PVR_EON_ID: pvr.eon
       XBMC_REF: Omega
@@ -13,12 +17,12 @@ jobs:
       CMAKE_POLICY_VERSION_MINIMUM: "3.5"
     steps:
       - name: Checkout addon
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: pvr.eon
 
       - name: Checkout xbmc
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: xbmc/xbmc
           ref: ${{ env.XBMC_REF }}
@@ -70,10 +74,21 @@ jobs:
           cmake --build "$work/build" --target "$PVR_EON_ID" --parallel 3
           cmake --build "$work/build" --target "package-$PVR_EON_ID" --parallel 3
 
+      # Flattens the packaged zip and writes the release copy the way the
+      # repository names it: <id>-<version>+<platform>.zip, with the same
+      # suffix on the version inside its addon.xml.
+      - name: Normalize packaged addon
+        run: |
+          python3 pvr.eon/tools/normalize-addon-zip.py \
+            --platform osx-arm64 --out-dir out/final \
+            $(find out/zips -name '*.zip')
+          echo "ADDON_ZIP=$(ls out/final/*.zip)" >> "$GITHUB_ENV"
+
+      # archive: false uploads the zip itself rather than wrapping it in a
+      # second one; the artifact then takes the file's own name.
       - name: Upload zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: pvr.eon-osx-arm64
-          path: out/zips/**/*.zip
+          path: ${{ env.ADDON_ZIP }}
+          archive: false
           if-no-files-found: error
-          

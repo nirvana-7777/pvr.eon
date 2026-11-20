@@ -11,6 +11,7 @@ RUN apt-get update \
     libcurl4-openssl-dev \
     pkg-config \
     rapidjson-dev \
+    unzip \
     zip \
  && rm -rf /var/lib/apt/lists/*
 

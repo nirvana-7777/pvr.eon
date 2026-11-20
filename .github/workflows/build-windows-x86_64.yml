@@ -1,0 +1,68 @@
+name: Build windows-x86_64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    env:
+      PVR_EON_ID: pvr.eon
+      XBMC_REF: Omega
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+    steps:
+      - name: Checkout addon
+        uses: actions/checkout@v7
+        with:
+          path: pvr.eon
+
+      - name: Checkout xbmc
+        uses: actions/checkout@v7
+        with:
+          repository: xbmc/xbmc
+          ref: ${{ env.XBMC_REF }}
+          path: xbmc
+
+      - name: Prepare addon definition
+        shell: bash
+        run: |
+          mkdir -p definition/"$PVR_EON_ID" out/zips out/install
+          printf '%s . .\n' "$PVR_EON_ID" > definition/"$PVR_EON_ID"/"$PVR_EON_ID".txt
+          printf 'all\n' > definition/"$PVR_EON_ID"/platforms.txt
+
+      - name: Configure and build addon
+        shell: bash
+        run: |
+          work=$(pwd -W)
+          cmake \
+            -S "$work/xbmc/cmake/addons" \
+            -B "$work/build" \
+            -G "Visual Studio 17 2022" -A x64 \
+            -DADDONS_TO_BUILD="$PVR_EON_ID" \
+            -DADDONS_DEFINITION_DIR="$work/definition" \
+            -DADDON_SRC_PREFIX="$work" \
+            -DCMAKE_INSTALL_PREFIX="$work/out/install" \
+            -DPACKAGE_DIR="$work/out/zips" \
+            -DPACKAGE_ZIP=1
+          cmake --build "$work/build" --config Release --target "$PVR_EON_ID"
+          cmake --build "$work/build" --config Release --target "package-$PVR_EON_ID"
+
+      # Flattens the packaged zip and writes the release copy the way the
+      # repository names it: <id>-<version>+<platform>.zip, with the same
+      # suffix on the version inside its addon.xml.
+      - name: Normalize packaged addon
+        shell: bash
+        run: |
+          python pvr.eon/tools/normalize-addon-zip.py \
+            --platform windows-x86_64 --out-dir out/final \
+            $(find out/zips -name '*.zip')
+          echo "ADDON_ZIP=$(ls out/final/*.zip)" >> "$GITHUB_ENV"
+
+      # archive: false uploads the zip itself rather than wrapping it in a
+      # second one; the artifact then takes the file's own name.
+      - name: Upload zip
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.ADDON_ZIP }}
+          archive: false
+          if-no-files-found: error

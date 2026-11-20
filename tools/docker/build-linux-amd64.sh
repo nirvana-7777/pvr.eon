@@ -27,11 +27,16 @@ docker build \
   -f "${script_dir}/linux-amd64.Dockerfile" \
   "${addon_root}"
 
+# HOME: the --user uid has no home directory inside the image, so it
+# defaults to the unwritable "/"; RapidJSON's CMake export then warns
+# that it cannot create its package registry file there.
 docker run --rm \
   --platform linux/amd64 \
   --user "$(id -u):$(id -g)" \
+  -e HOME=/tmp \
   -e BUILD_TYPE="${BUILD_TYPE:-Release}" \
   -e XBMC_REF="${XBMC_REF:-origin/Omega}" \
+  -e PVR_EON_REF="${PVR_EON_REF:-}" \
   -v "${xbmc_root}:/src/xbmc:ro" \
   -v "${addon_root}:/src/pvr.eon:ro" \
   -v "${output_root}:/out" \

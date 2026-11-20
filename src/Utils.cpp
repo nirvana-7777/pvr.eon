@@ -125,7 +125,12 @@ time_t Utils::StringToTime(const std::string &timeString)
   tm.tm_min = m - tzm;
   tm.tm_sec = s;
 
+#ifdef _WIN32
+  // MSVC has no timegm; _mkgmtime is its exact equivalent.
+  time_t ret = _mkgmtime(&tm);
+#else
   time_t ret = timegm(&tm);
+#endif
   return ret;
 }
 

@@ -33,11 +33,16 @@ docker build \
   -f "${script_dir}/android-aarch64.Dockerfile" \
   "${addon_root}"
 
+# HOME: the --user uid has no home directory inside the image, so it
+# defaults to the unwritable "/"; RapidJSON's CMake export then warns
+# that it cannot create its package registry file there.
 docker run --rm \
   --platform linux/amd64 \
   --user "$(id -u):$(id -g)" \
+  -e HOME=/tmp \
   -e BUILD_TYPE="${BUILD_TYPE:-Release}" \
   -e XBMC_REF="${XBMC_REF:-origin/Omega}" \
+  -e PVR_EON_REF="${PVR_EON_REF:-}" \
   -e ANDROID_NDK_API="${ANDROID_NDK_API:-21}" \
   -e ANDROID_NDK_VERSION="${android_ndk_version}" \
   -v "${xbmc_root}:/src/xbmc:ro" \

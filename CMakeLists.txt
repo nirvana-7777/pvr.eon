@@ -40,6 +40,11 @@ set(EON_HEADERS
   src/Globals.h
 )
 
+if(WIN32)
+  # The seek proxy (StreamRedirectProxy) talks winsock on Windows.
+  list(APPEND DEPLIBS ws2_32)
+endif()
+
 addon_version(pvr.eon EON)
 add_definitions(-DEON_VERSION=${EON_VERSION})
 

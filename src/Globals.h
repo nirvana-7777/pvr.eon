@@ -32,6 +32,16 @@ static const std::string CONN_TYPE_ETHERNET= "ETHERNET";
 static const std::string CONN_TYPE_MOBILE = "MOBILE";
 static const std::string CONN_TYPE_BROWSER = "BROWSER";
 
+// Vivacom signs users in through its own identity provider (Vivacom ID,
+// login.vivacom.bg) with OAuth2 authorization code + PKCE, exactly like the
+// eontv.bg web app. These are the web app's public client values (they ship in
+// its page traffic), not user secrets.
+static const std::string VIVACOM_CLIENT_ID = "b5826897-1736-4646-af04-0a0cf891e0ac";
+static const std::string VIVACOM_CLIENT_SECRET = "9xk3m5f2e7q1z0r4h8c6dypoavwsgntulbjmi";
+static const std::string VIVACOM_REDIRECT_URI = "https://eontv.bg";
+static const std::string VIVACOM_LOGIN_HOST = "login.vivacom.bg";
+static const std::string VIVACOM_BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36";
+
 struct EonParameter
 {
   std::string api_prefix;

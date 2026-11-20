@@ -4,6 +4,7 @@ set -euo pipefail
 : "${PVR_EON_ID:=pvr.eon}"
 : "${XBMC_REF:=origin/Omega}"
 : "${PVR_EON_REF:=}"
+: "${PVR_EON_VERSION_MAJOR:=}"
 : "${BUILD_TYPE:=Release}"
 : "${LINUX_HOST:=arm-linux-gnueabihf}"
 : "${LINUX_RENDER_SYSTEM:=gles}"
@@ -32,6 +33,62 @@ if [[ "${build_type_lc}" == "debug" ]]; then
 else
   depends_debug_flag="no"
 fi
+
+# ---------------------------------------------------------------------------
+# Normalize what gets shipped. Kodi's packaging writes the library as a
+# versioned chain (pvr.eon.so -> pvr.eon.so.<kodi> -> pvr.eon.so.<version>)
+# with addon.xml naming the fully versioned file; in a zip the links survive
+# only as copies, and any chain/addon.xml mismatch is fatal at load time
+# ("Could not locate pvr.eon.so.<version>"). A single unversioned library
+# named by addon.xml cannot mismatch anything, and its name no longer changes
+# from release to release. The kodi.binary.* imports the build injects are
+# also aligned with the hand-written ones, with no blank line after
+# <requires>. On targets whose library has another naming scheme (Android's
+# libpvr.eon.so) the flattening finds nothing and only the formatting runs.
+normalize_addon_dir() {
+  local addon_dir=$1
+  local xml="${addon_dir}/addon.xml"
+  [[ -f "${xml}" ]] || return 0
+
+  # The real library is the largest regular file of the chain: copies made
+  # from the links match its size, links stored as links resolve through
+  # readlink and a dangling one is skipped.
+  local real_so="" candidate resolved
+  while IFS= read -r candidate; do
+    resolved=$(readlink -f "${candidate}") || continue
+    [[ -f "${resolved}" ]] || continue
+    if [[ -z "${real_so}" || $(stat -c%s "${resolved}") -gt $(stat -c%s "${real_so}") ]]; then
+      real_so="${resolved}"
+    fi
+  done < <(find "${addon_dir}" -maxdepth 1 -name "${PVR_EON_ID}.so*")
+
+  if [[ -n "${real_so}" ]]; then
+    local keep="${addon_dir}/${PVR_EON_ID}.so.keep"
+    cp -f "${real_so}" "${keep}"
+    find "${addon_dir}" -maxdepth 1 -name "${PVR_EON_ID}.so*" ! -name "*.keep" -exec rm -f {} +
+    mv "${keep}" "${addon_dir}/${PVR_EON_ID}.so"
+    sed -i "s/library_linux=\"[^\"]*\"/library_linux=\"${PVR_EON_ID}.so\"/" "${xml}"
+  fi
+
+  # No blank (whitespace-only) lines anywhere EXCEPT inside <news>, whose
+  # blank lines separate version entries and are meaningful.
+  sed -i '/<news>/,/<\/news>/!{/^[[:space:]]*$/d}' "${xml}"
+  sed -i 's/^<import addon="kodi\./\t\t<import addon="kodi./' "${xml}"
+}
+
+normalize_zip() {
+  # Absolute path: the function cd-s around, a relative path would break.
+  local zipfile
+  zipfile=$(readlink -f "$1")
+  local tmp="${work_root}/normalize"
+  rm -rf "${tmp}"
+  mkdir -p "${tmp}"
+  (cd "${tmp}" && unzip -q "${zipfile}")
+  normalize_addon_dir "${tmp}/${PVR_EON_ID}"
+  rm -f "${zipfile}"
+  (cd "${tmp}" && zip -qry "${zipfile}" "${PVR_EON_ID}")
+  rm -rf "${tmp}"
+}
 
 if [[ ! -d "${xbmc_src}/.git" ]]; then
   echo "Expected a git checkout at ${xbmc_src}" >&2
@@ -77,6 +134,15 @@ if [[ -n "${PVR_EON_REF}" ]]; then
   git -C "${addon_work}" checkout --detach -f "${PVR_EON_REF}" >/dev/null
 fi
 
+# The Kodi 20 "Nexus" build of the same source carries a 20.x addon version
+# (the version alone says which Kodi a zip is for); the wrapper sets
+# PVR_EON_VERSION_MAJOR=20 and the major digit is swapped here before CMake
+# reads it, so the zip, the library chain and addon.xml all agree.
+if [[ -n "${PVR_EON_VERSION_MAJOR}" ]]; then
+  sed -i -E "s/(<addon[^>]*version=\")[0-9]+(\.[^\"]*\")/\1${PVR_EON_VERSION_MAJOR}\2/" \
+    "${addon_work}/${PVR_EON_ID}/addon.xml.in"
+fi
+
 printf '%s . .\n' "${PVR_EON_ID}" > "${definition_dir}/${PVR_EON_ID}/${PVR_EON_ID}.txt"
 printf 'linux\n' > "${definition_dir}/${PVR_EON_ID}/platforms.txt"
 
@@ -116,6 +182,19 @@ cmake \
 
 cmake --build "${build_dir}" --target "${PVR_EON_ID}" --parallel "$(nproc)"
 cmake --build "${build_dir}" --target "package-${PVR_EON_ID}" --parallel "$(nproc)"
+
+normalize_addon_dir "${install_dir}/${PVR_EON_ID}"
+# The packaging target nests the zip one level deeper (zips/<addon-id>/),
+# so walk the whole tree instead of globbing the top level.
+found_zip=0
+while IFS= read -r packaged_zip; do
+  echo "Normalizing $(basename "${packaged_zip}")"
+  normalize_zip "${packaged_zip}"
+  found_zip=1
+done < <(find "${package_dir}" -type f -name '*.zip')
+if [[ "${found_zip}" -eq 0 ]]; then
+  echo "WARNING: no addon zip found under ${package_dir} -- nothing was normalized" >&2
+fi
 
 git -C "${xbmc_work}" rev-parse HEAD > "${output_root}/xbmc-commit.txt"
 # The addon tree may come from an archive without .git; skip the hash quietly.

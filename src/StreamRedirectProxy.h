@@ -36,12 +36,17 @@ struct StreamParams
   // an audio-only profile must send 0 here -- see getVideoBitrate() comment in
   // PVREon.cpp.
   unsigned int videoBitrate = 0;
-  // Used to fetch a fresh ctime for every seek (see BuildEncryptedUrl) --
-  // the CDN rejects an encrypted URL if its embedded ctime is more than
-  // ~20 seconds old, so a cached device-clock-relative offset isn't
-  // reliable enough; matches how the non-proxy path calls this API fresh
-  // for every request.
+  // Fallback source for the ctime every seek URL embeds (see
+  // BuildEncryptedUrl), used only when the offset below is unknown or stale.
   std::string apiTimeUrl;
+  // Difference between the backend clock and this device's, as last measured
+  // by CPVREon::GetTime(). The CDN rejects an encrypted URL whose ctime is
+  // more than ~20 seconds old, which this satisfies: the offset is applied to
+  // the current device clock, so the result is a present-tense timestamp, and
+  // it is re-measured often enough that drift stays far inside that window.
+  int64_t serverTimeOffsetMs = 0;
+  int64_t serverTimeMeasuredAtMs = 0;
+  bool serverTimeKnown = false;
   std::string accessToken;
   // Sent as the User-Agent for the proxy's own HTTP calls (time fetch,
   // verify-fetch) -- the CDN blocks requests missing a recognized
@@ -91,14 +96,20 @@ private:
   static std::string BuildEncryptedUrl(const StreamParams& params, time_t timestamp);
 
   int m_port = 0;
-  int m_serverSocket = -1;
-  // Self-pipe used to wake ServerThread's select() from Stop(). Closing
-  // m_serverSocket from the stopping thread instead raced with ServerThread's
-  // own use of it: it could FD_SET(-1) (undefined behaviour -- FD_SET indexes
-  // the fd_set bitmap, so a negative fd writes out of bounds) or accept() on a
-  // descriptor number the OS had already reused. ServerThread alone owns
-  // m_serverSocket and closes it when the loop exits.
-  int m_wakePipe[2] = {-1, -1};
+  // Sockets are stored as intptr_t so one header serves both socket APIs:
+  // on POSIX it holds the int descriptor, on Windows the SOCKET handle --
+  // whose INVALID_SOCKET value is ~0 and therefore -1 once cast, so the
+  // "invalid is negative" convention below works unchanged on both.
+  intptr_t m_serverSocket = -1;
+  // Wake channel used to interrupt ServerThread's select() from Stop() --
+  // a self-pipe on POSIX, a loopback UDP socket pair on Windows (winsock's
+  // select() only watches sockets). Closing m_serverSocket from the stopping
+  // thread instead raced with ServerThread's own use of it: it could
+  // FD_SET(-1) (undefined behaviour -- FD_SET indexes the fd_set bitmap, so
+  // a negative fd writes out of bounds) or accept() on a descriptor number
+  // the OS had already reused. ServerThread alone owns m_serverSocket and
+  // closes it when the loop exits.
+  intptr_t m_wakePipe[2] = {-1, -1};
   std::atomic<bool> m_running{false};
   std::thread m_thread;
 
